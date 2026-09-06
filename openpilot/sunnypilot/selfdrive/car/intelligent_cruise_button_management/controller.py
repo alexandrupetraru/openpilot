@@ -44,7 +44,7 @@ class IntelligentCruiseButtonManagement:
     self.v_target_ms_last = 0.0
     self.is_metric = False
 
-    self.cruise_button_timers = CRUISE_BUTTON_TIMER
+    self.cruise_button_timers = CRUISE_BUTTON_TIMER.copy()  # module-level dict; must not be aliased
 
   @property
   def v_cruise_equal(self) -> bool:

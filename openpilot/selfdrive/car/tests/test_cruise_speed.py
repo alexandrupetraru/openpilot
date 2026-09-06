@@ -5,7 +5,7 @@ from openpilot.common.test import OpenpilotTestCase
 from openpilot.common.parameterized import parameterized_class
 from openpilot.cereal import log
 from openpilot.selfdrive.car.cruise import (
-  IMPERIAL_INCREMENT, PREDICTIVE_TYPE_CURVE, PREDICTIVE_TYPE_SPEED_LIMIT, VCruiseHelper,
+  CRUISE_BUTTON_STUCK_FRAMES, CRUISE_LONG_PRESS, IMPERIAL_INCREMENT, PREDICTIVE_TYPE_CURVE, PREDICTIVE_TYPE_SPEED_LIMIT, VCruiseHelper,
   V_CRUISE_INITIAL, V_CRUISE_MAX, V_CRUISE_MIN,
 )
 from openpilot.cereal import custom
@@ -156,6 +156,32 @@ class TestVCruiseHelper(OpenpilotTestCase):
           self.enable(float(v_ego), experimental_mode, dynamic_experimental_control)
           assert V_CRUISE_INITIAL <= self.v_cruise_helper.v_cruise_kph <= V_CRUISE_MAX
           assert self.v_cruise_helper.v_cruise_initialized
+
+  def test_missed_release_does_not_repeat_forever(self):
+    """
+    A press whose release event is never seen must stop synthesising long-press speed changes.
+    """
+    self.enable(V_CRUISE_INITIAL * CV.KPH_TO_MS, False, False)
+    CS = car.CarState(cruiseState={"available": True})
+    CS.buttonEvents = [ButtonEvent(type=ButtonType.accelCruise, pressed=True)]
+    self.v_cruise_helper.update_v_cruise(CS, self.CS_IC, enabled=True, is_metric=True)
+    CS.buttonEvents = []
+
+    # while the press is plausibly still held, long-press repeats are expected
+    v_start = self.v_cruise_helper.v_cruise_kph
+    for _ in range(CRUISE_LONG_PRESS * 2):
+      self.v_cruise_helper.update_v_cruise(CS, self.CS_IC, enabled=True, is_metric=True)
+    assert self.v_cruise_helper.v_cruise_kph > v_start
+    assert self.v_cruise_helper.button_timers[ButtonType.accelCruise] > 0
+
+    # past the stuck threshold the timer is dropped and the set speed is left alone
+    for _ in range(CRUISE_BUTTON_STUCK_FRAMES):
+      self.v_cruise_helper.update_v_cruise(CS, self.CS_IC, enabled=True, is_metric=True)
+    assert self.v_cruise_helper.button_timers[ButtonType.accelCruise] == 0
+    v_settled = self.v_cruise_helper.v_cruise_kph
+    for _ in range(CRUISE_LONG_PRESS * 4):
+      self.v_cruise_helper.update_v_cruise(CS, self.CS_IC, enabled=True, is_metric=True)
+    assert self.v_cruise_helper.v_cruise_kph == v_settled
 
   def test_curve_prediction_is_a_cap_not_a_setpoint(self):
     self.v_cruise_helper.v_cruise_kph = 70

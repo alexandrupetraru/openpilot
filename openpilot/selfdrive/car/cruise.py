@@ -19,6 +19,9 @@ IMPERIAL_INCREMENT = round(CV.MPH_TO_KPH, 1)  # round here to avoid rounding err
 ButtonEvent = car.CarState.ButtonEvent
 ButtonType = car.CarState.ButtonEvent.Type
 CRUISE_LONG_PRESS = 50
+# A button timer only stops on a release event. If that event is ever missed the timer would keep
+# synthesising long-press speed changes indefinitely; no physical press is plausibly held this long.
+CRUISE_BUTTON_STUCK_FRAMES = 15 * 100  # 15 s at 100 Hz
 PREDICTIVE_TYPE_SPEED_LIMIT = 1
 PREDICTIVE_TYPE_CURVE = 2
 CRUISE_NEAREST_FUNC = {
@@ -206,6 +209,8 @@ class VCruiseHelper(VCruiseHelperSP):
     for k in self.button_timers:
       if self.button_timers[k] > 0:
         self.button_timers[k] += 1
+        if self.button_timers[k] > CRUISE_BUTTON_STUCK_FRAMES:
+          self.button_timers[k] = 0  # missed release: stop treating it as held
 
     for b in CS.buttonEvents:
       if b.type.raw in self.button_timers:

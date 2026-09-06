@@ -23,6 +23,7 @@ CRUISE_BUTTON_TIMER = {ButtonType.decelCruise: 0, ButtonType.accelCruise: 0,
                        ButtonType.cancel: 0, ButtonType.mainCruise: 0}
 
 V_CRUISE_MIN = 8
+CRUISE_BUTTON_STUCK_FRAMES = 15 * 100  # 15 s at 100 Hz; a timer that never saw its release event is dropped
 V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
 
@@ -32,6 +33,8 @@ def update_manual_button_timers(CS: car.CarState, button_timers: dict[car.CarSta
   for k in button_timers:
     if button_timers[k] > 0:
       button_timers[k] += 1
+      if button_timers[k] > CRUISE_BUTTON_STUCK_FRAMES:
+        button_timers[k] = 0  # missed release: stop reporting the button as held
 
   for b in CS.buttonEvents:
     if b.type.raw in button_timers:
@@ -53,7 +56,7 @@ class VCruiseHelperSP:
     self.short_increment = self.params.get("CustomAccShortPressIncrement", return_default=True)
     self.long_increment = self.params.get("CustomAccLongPressIncrement", return_default=True)
 
-    self.enable_button_timers = CRUISE_BUTTON_TIMER
+    self.enable_button_timers = CRUISE_BUTTON_TIMER.copy()  # module-level dict; must not be aliased
 
     # Speed Limit Assist
     self.sla_state = SpeedLimitAssistState.disabled
