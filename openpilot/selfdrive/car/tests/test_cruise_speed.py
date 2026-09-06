@@ -9,6 +9,7 @@ from openpilot.selfdrive.car.cruise import (
   V_CRUISE_INITIAL, V_CRUISE_MAX, V_CRUISE_MIN,
 )
 from openpilot.cereal import custom
+from openpilot.sunnypilot.selfdrive.car.cruise_ext import ICBM_PRESS_HOLDOFF_FRAMES
 from opendbc.car.structs import car, CarStateIC
 from openpilot.common.constants import CV
 from openpilot.selfdrive.test.longitudinal_maneuvers.maneuver import Maneuver
@@ -274,6 +275,25 @@ class TestVCruiseHelperIcbm(OpenpilotTestCase):
     self._step(40, [ButtonEvent(type=ButtonType.accelCruise, pressed=False)])
     self._step(40, n=5)
     assert self.v_cruise_helper.v_cruise_kph == 40             # not 21, and not clipped up to the ICBM floor
+
+  def test_icbm_own_presses_are_not_adopted_during_sync(self):
+    """While the sync window is open, a step the car makes in reaction to ICBM's own press is not the driver's choice."""
+    self._engage(20)
+    self._step(20, [ButtonEvent(type=ButtonType.accelCruise, pressed=True)])
+    self._step(40)
+    self._step(40, [ButtonEvent(type=ButtonType.accelCruise, pressed=False)])
+    self._step(40, n=5)
+    assert self.v_cruise_helper.v_cruise_kph == 40
+    send = custom.IntelligentCruiseButtonManagement.SendButtonState.decrease
+    self.v_cruise_helper.update_v_cruise(self._cs(40), self.CS_IC, enabled=True, is_metric=True, icbm_send_button=send)
+    for _ in range(10):
+      self.v_cruise_helper.update_v_cruise(self._cs(39), self.CS_IC, enabled=True, is_metric=True)
+    assert self.v_cruise_helper.v_cruise_kph == 40             # ICBM's own -1 was not adopted as a new driver choice
+    # It is a hold-off, not a window close: if a driver press ever races with an ICBM press, the car's reaction
+    # to the driver must still be learned once the hold-off ends (ICBM itself pauses for the whole window).
+    for _ in range(ICBM_PRESS_HOLDOFF_FRAMES):
+      self.v_cruise_helper.update_v_cruise(self._cs(39), self.CS_IC, enabled=True, is_metric=True)
+    assert self.v_cruise_helper.v_cruise_kph == 39
 
   def test_set_and_resume_presses_also_sync(self):
     self._engage(50)

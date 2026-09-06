@@ -84,6 +84,16 @@ def _migrate_tesla_mads_screen_button(_params):
     cloudlog.exception(f"Error migrating TeslaMadsScreenButton: {e}")
 
 
+def _seed_icbm_hold_set_speed(_params):
+  # New toggle, on by default: seed it so the settings UI reflects the behaviour that is actually active.
+  try:
+    if _params.get("IcbmHoldSetSpeed") is None:
+      _params.put_bool("IcbmHoldSetSpeed", True, block=True)
+      cloudlog.info("params_migration: seeded IcbmHoldSetSpeed=1")
+  except Exception as e:
+    cloudlog.exception(f"Error seeding IcbmHoldSetSpeed: {e}")
+
+
 def _migrate_model_bundle_slots(_params):
   # Pre-split, a chestnut user's big-model selection lived in the single
   # ActiveBundle. Seed both slots; validation drops whichever does not match
@@ -142,3 +152,5 @@ def run_migration(_params):
 
   # seed the chestnut model slot from the pre-split single slot
   _migrate_model_bundle_slots(_params)
+
+  _seed_icbm_hold_set_speed(_params)

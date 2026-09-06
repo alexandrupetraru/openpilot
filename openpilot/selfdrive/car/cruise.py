@@ -52,7 +52,8 @@ class VCruiseHelper(VCruiseHelperSP):
   def v_cruise_initialized(self):
     return self.v_cruise_kph != V_CRUISE_UNSET
 
-  def update_v_cruise(self, CS, CS_IC: CarStateIC, enabled, is_metric, speed_limit_control=False, speed_limit_predicative=False):
+  def update_v_cruise(self, CS, CS_IC: CarStateIC, enabled, is_metric, speed_limit_control=False, speed_limit_predicative=False,
+                      icbm_send_button=None):
     self.v_cruise_kph_last = self.v_cruise_kph
 
     self.get_minimum_set_speed(is_metric)
@@ -66,7 +67,7 @@ class VCruiseHelper(VCruiseHelperSP):
         self._update_v_cruise_non_pcm(CS, _enabled, is_metric)
         if self.icbm_active:
           self.note_driver_buttons(CS)
-          self.sync_v_cruise_with_car(CS)
+          self.sync_v_cruise_with_car(CS, icbm_send_button)
         self.update_speed_limit_assist_v_cruise_non_pcm()
         self._apply_curve_speed_cap()
         self.v_cruise_cluster_kph = self.v_cruise_kph

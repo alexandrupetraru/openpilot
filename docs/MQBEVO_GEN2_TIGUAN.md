@@ -46,10 +46,24 @@ are set exactly as before; see `opendbc/car/volkswagen/tests/test_mqbevo_gen2.py
 * The car's ACC minimum set speed is 20 km/h, which is what `MAX 20` on the HUD shows at a standstill.
 * Do not enable sunnypilot Longitudinal Control (alpha) on Gen 2: there are no decoded radar objects.
 
+## Second update (2026-09-07): hold set speed, 20 km/h floor, route data on bus 0
+
+* **ICBM: Hold Set Speed** (new toggle, on by default). ICBM tracks the set speed you selected, lowered only by
+  Smart Cruise Control / Speed Limit Assist, and restores it afterwards. The stock radar ACC keeps its own
+  acceleration and lead following; the car is never asked for more than you set. Previously ICBM chased the
+  planner's MPC speed, which produced a dip after every `+`, a slow ramp, ±1–8 km/h hunting and vision-lead
+  following through button presses. ICBM also pauses for 1.5 s after any stalk press and openpilot no longer
+  adopts the car's reaction to ICBM's own presses.
+* **ICBM minimum set speed 20 km/h on MQB Evo Gen 2** (Tiguan 2025-26, RS3 2026): the ACC accepts 20, so curve
+  logic can act in tight city corners. Other cars keep 30.
+* **VW route data (PSD_04/05/06) is read from bus 0** on camera-integrated cars. The car's own map delivers
+  speed limits (50/30/20 zones in the drive logs) to the "Car" speed-limit source; camera sign recognition is
+  not on CAN on Gen 2 and stays unavailable. Use **Car First** with OSM as fallback.
+
 ## Recommended settings for stock ACC + ICBM
 
-* Cruise: ICBM **on**, Smart Cruise Control Vision on / Map off, Speed Limit **Info** first;
-  Customize Source → **Car Only** before enabling Assist (default policy is Map First).
+* Cruise: ICBM **on**, Hold Set Speed **on**, Smart Cruise Control Vision on / Map off until Romania OSM is
+  downloaded, Speed Limit **Warning** first; Customize Source → **Car First**; then Assist with Fixed +10.
 * infiniteCable: "VW: Lateral Correction (Recommended)" on; the four "VW: Speed Limit …" toggles off
   until the car's reported limits have been checked in Info mode.
 * sunnypilot Longitudinal Control (alpha) **off** — Gen 2 has no decoded radar objects.

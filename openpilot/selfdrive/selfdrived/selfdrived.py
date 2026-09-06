@@ -541,7 +541,7 @@ class SelfdriveD(CruiseHelper):
           self.events.add(EventName.personalityChanged)
         self.experimental_mode_switched = False
 
-    self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric)
+    self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric, force_decel=self.sm['controlsState'].forceDecel)
 
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)
@@ -687,6 +687,7 @@ class SelfdriveD(CruiseHelper):
       self.personality = self.params.get("LongitudinalPersonality", return_default=True)
 
       self.mads.read_params()
+      self.icbm.read_params()
       time.sleep(0.1)
 
   def run(self):

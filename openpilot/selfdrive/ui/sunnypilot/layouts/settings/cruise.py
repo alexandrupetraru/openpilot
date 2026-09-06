@@ -47,6 +47,12 @@ class CruiseLayout(Widget):
       description="",
       param="IntelligentCruiseButtonManagement")
 
+    self.icbm_hold_toggle = toggle_item_sp(
+      title=tr("ICBM: Hold Set Speed"),
+      description=tr("Keep the cruise set speed you selected and lower it only for Smart Cruise Control or Speed Limit Assist. " +
+                     "When off, ICBM follows sunnypilot's planned speed instead (its acceleration profile and vision lead following)."),
+      param="IcbmHoldSetSpeed")
+
     self.scc_v_toggle = toggle_item_sp(
       title=tr("Smart Cruise Control - Vision"),
       description=tr("Use vision path predictions to estimate the appropriate speed to drive through turns ahead."),
@@ -89,6 +95,7 @@ class CruiseLayout(Widget):
 
     items = [
       self.icbm_toggle,
+      self.icbm_hold_toggle,
       self.dec_toggle,
       self.scc_v_toggle,
       self.scc_m_toggle,
@@ -125,10 +132,12 @@ class CruiseLayout(Widget):
 
       if ui_state.CP_SP.intelligentCruiseButtonManagementAvailable and not has_long:
         self.icbm_toggle.action_item.set_enabled(ui_state.is_offroad())
+        self.icbm_hold_toggle.action_item.set_enabled(ui_state.is_offroad())
         self.icbm_toggle.set_description(tr(ICBM_DESC))
       else:
         ui_state.params.remove("IntelligentCruiseButtonManagement")
         self.icbm_toggle.action_item.set_enabled(False)
+        self.icbm_hold_toggle.action_item.set_enabled(False)
 
         long_desc = ICMB_UNAVAILABLE
         if has_long:

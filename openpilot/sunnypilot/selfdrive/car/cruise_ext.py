@@ -17,6 +17,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.helpers import comp
 
 ButtonType = car.CarState.ButtonEvent.Type
 SpeedLimitAssistState = custom.LongitudinalPlanSP.SpeedLimit.AssistState
+SendButtonState = custom.IntelligentCruiseButtonManagement.SendButtonState
 
 CRUISE_BUTTON_TIMER = {ButtonType.decelCruise: 0, ButtonType.accelCruise: 0,
                        ButtonType.setCruise: 0, ButtonType.resumeCruise: 0,
@@ -28,6 +29,7 @@ V_CRUISE_MIN = 8
 # speed). openpilot cannot know that delta, so for a short window after a driver button it adopts whatever
 # set speed the car reports instead of guessing - otherwise ICBM would 'correct' the car back to the guess.
 CAR_SYNC_FRAMES = 150  # 1.5 s at 100 Hz
+ICBM_PRESS_HOLDOFF_FRAMES = 30  # after ICBM itself presses a button, the car's next change is ours, not the driver's
 CAR_SYNC_PASSTHROUGH_BUTTONS = (ButtonType.setCruise, ButtonType.resumeCruise)  # accel/decel are handled in VCruiseHelper
 CRUISE_BUTTON_STUCK_FRAMES = 15 * 100  # 15 s at 100 Hz; a timer that never saw its release event is dropped
 V_CRUISE_MAX = 145
@@ -64,6 +66,7 @@ class VCruiseHelperSP:
 
     self.enable_button_timers = CRUISE_BUTTON_TIMER.copy()  # module-level dict; must not be aliased
     self.car_sync_frames = 0
+    self.icbm_press_frames_left = 0
 
     # Speed Limit Assist
     self.sla_state = SpeedLimitAssistState.disabled
@@ -100,7 +103,7 @@ class VCruiseHelperSP:
       self.v_cruise_min = V_CRUISE_MIN
       return
 
-    self.v_cruise_min = get_minimum_set_speed(is_metric)
+    self.v_cruise_min = get_minimum_set_speed(is_metric, self.CP)
 
   def update_enabled_state(self, CS: car.CarState, enabled: bool) -> bool:
     # special enabled state for non pcmCruiseSpeed, unchanged for non pcmCruise
@@ -131,10 +134,20 @@ class VCruiseHelperSP:
     if any(b.type.raw in CAR_SYNC_PASSTHROUGH_BUTTONS for b in CS.buttonEvents):
       self.start_car_sync()
 
-  def sync_v_cruise_with_car(self, CS: car.CarState) -> None:
+  def note_icbm_press(self, icbm_send_button) -> None:
+    raw = getattr(icbm_send_button, "raw", icbm_send_button)
+    if raw not in (None, 0, SendButtonState.none):
+      self.icbm_press_frames_left = ICBM_PRESS_HOLDOFF_FRAMES
+
+  def sync_v_cruise_with_car(self, CS: car.CarState, icbm_send_button=None) -> None:
+    self.note_icbm_press(icbm_send_button)
+    if self.icbm_press_frames_left > 0:
+      self.icbm_press_frames_left -= 1
     if self.car_sync_frames <= 0:
       return
     self.car_sync_frames -= 1
+    if self.icbm_press_frames_left > 0:
+      return  # the car is reacting to our own press; adopting it would drift the set speed the driver chose
     car_kph = CS.cruiseState.speed * CV.MS_TO_KPH
     if car_kph > 0 and abs(car_kph - self.v_cruise_kph) >= 0.5:
       self.v_cruise_kph = float(np.clip(round(car_kph, 1), V_CRUISE_MIN, V_CRUISE_MAX))
