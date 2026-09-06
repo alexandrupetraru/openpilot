@@ -238,3 +238,62 @@ class TestVCruiseHelper(OpenpilotTestCase):
     self.CS_IC.cruiseSpeedLimitPredicativeType = PREDICTIVE_TYPE_SPEED_LIMIT
     self.v_cruise_helper._update_v_speed_limit(None, self.CS_IC, True, True, True)
     assert self.v_cruise_helper.v_cruise_kph == 80
+
+
+@parameterized_class(('pcm_cruise', 'pcm_cruise_speed'), [(True, False)])
+class TestVCruiseHelperIcbm(OpenpilotTestCase):
+  """Stock cruise owns the set speed; openpilot only nudges it through the buttons (Intelligent Cruise Button Management)."""
+
+  def setup_method(self):
+    self.CP = car.CarParams(pcmCruise=self.pcm_cruise)
+    self.CP_SP = custom.CarParamsSP(pcmCruiseSpeed=self.pcm_cruise_speed)
+    self.CS_IC = CarStateIC()
+    self.v_cruise_helper = VCruiseHelper(self.CP, self.CP_SP)
+
+  def _cs(self, car_set_kph, buttons=()):
+    v = car_set_kph * CV.KPH_TO_MS
+    CS = car.CarState(cruiseState={"available": True, "enabled": True, "speed": v, "speedCluster": v})
+    CS.buttonEvents = list(buttons)
+    return CS
+
+  def _step(self, car_set_kph, buttons=(), enabled=True, n=1):
+    for _ in range(n):
+      self.v_cruise_helper.update_v_cruise(self._cs(car_set_kph, buttons), self.CS_IC, enabled=enabled, is_metric=True)
+
+  def _engage(self, car_set_kph):
+    self._step(car_set_kph, enabled=False, n=2)   # mirrors the car while not engaged
+    self._step(car_set_kph, n=3)                  # latches openpilot's own set speed on engage
+    assert self.v_cruise_helper.v_cruise_kph == car_set_kph
+
+  def test_driver_press_adopts_the_cars_result(self):
+    """The car applies its own step to a stalk press (this VW rounds '+' to the next 10 km/h); openpilot must not guess a delta."""
+    self._engage(20)
+    self._step(20, [ButtonEvent(type=ButtonType.accelCruise, pressed=True)])
+    self._step(31)
+    self._step(40)  # car reacts before the release, in two steps
+    self._step(40, [ButtonEvent(type=ButtonType.accelCruise, pressed=False)])
+    self._step(40, n=5)
+    assert self.v_cruise_helper.v_cruise_kph == 40             # not 21, and not clipped up to the ICBM floor
+
+  def test_set_and_resume_presses_also_sync(self):
+    self._engage(50)
+    self._step(50, [ButtonEvent(type=ButtonType.setCruise, pressed=True)])
+    self._step(32)
+    self._step(32, [ButtonEvent(type=ButtonType.setCruise, pressed=False)])
+    self._step(32, n=5)
+    assert self.v_cruise_helper.v_cruise_kph == 32
+
+  def test_car_changes_without_a_press_do_not_move_openpilot(self):
+    """Without a driver press openpilot stays authoritative, so ICBM can restore the set speed the car dropped by itself."""
+    self._engage(40)
+    self._step(40, n=CRUISE_LONG_PRESS * 4)  # well past any sync window
+    self._step(35, n=10)
+    assert self.v_cruise_helper.v_cruise_kph == 40
+
+  def test_sync_respects_cruise_max(self):
+    self._engage(140)
+    self._step(140, [ButtonEvent(type=ButtonType.accelCruise, pressed=True)])
+    self._step(150, [ButtonEvent(type=ButtonType.accelCruise, pressed=False)])
+    self._step(150, n=5)
+    assert self.v_cruise_helper.v_cruise_kph == V_CRUISE_MAX
+

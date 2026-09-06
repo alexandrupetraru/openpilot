@@ -23,6 +23,12 @@ CRUISE_BUTTON_TIMER = {ButtonType.decelCruise: 0, ButtonType.accelCruise: 0,
                        ButtonType.cancel: 0, ButtonType.mainCruise: 0}
 
 V_CRUISE_MIN = 8
+# With Intelligent Cruise Button Management the stalk is still wired to the car, which applies its own
+# step logic (e.g. the VW MQB Evo rocker jumps to the next multiple of 10 km/h and SET stores the current
+# speed). openpilot cannot know that delta, so for a short window after a driver button it adopts whatever
+# set speed the car reports instead of guessing - otherwise ICBM would 'correct' the car back to the guess.
+CAR_SYNC_FRAMES = 150  # 1.5 s at 100 Hz
+CAR_SYNC_PASSTHROUGH_BUTTONS = (ButtonType.setCruise, ButtonType.resumeCruise)  # accel/decel are handled in VCruiseHelper
 CRUISE_BUTTON_STUCK_FRAMES = 15 * 100  # 15 s at 100 Hz; a timer that never saw its release event is dropped
 V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
@@ -57,6 +63,7 @@ class VCruiseHelperSP:
     self.long_increment = self.params.get("CustomAccLongPressIncrement", return_default=True)
 
     self.enable_button_timers = CRUISE_BUTTON_TIMER.copy()  # module-level dict; must not be aliased
+    self.car_sync_frames = 0
 
     # Speed Limit Assist
     self.sla_state = SpeedLimitAssistState.disabled
@@ -110,6 +117,27 @@ class VCruiseHelperSP:
       return enabled and self.enabled_prev
 
     return enabled
+
+  @property
+  def icbm_active(self) -> bool:
+    # stock cruise owns the set speed, openpilot only nudges it through the buttons
+    return bool(self.CP.pcmCruise and not self.CP_SP.pcmCruiseSpeed)
+
+  def start_car_sync(self) -> None:
+    self.car_sync_frames = CAR_SYNC_FRAMES
+
+  def note_driver_buttons(self, CS: car.CarState) -> None:
+    # SET / RESUME are not cruise-speed buttons for openpilot, but on the car they still move the set speed
+    if any(b.type.raw in CAR_SYNC_PASSTHROUGH_BUTTONS for b in CS.buttonEvents):
+      self.start_car_sync()
+
+  def sync_v_cruise_with_car(self, CS: car.CarState) -> None:
+    if self.car_sync_frames <= 0:
+      return
+    self.car_sync_frames -= 1
+    car_kph = CS.cruiseState.speed * CV.MS_TO_KPH
+    if car_kph > 0 and abs(car_kph - self.v_cruise_kph) >= 0.5:
+      self.v_cruise_kph = float(np.clip(round(car_kph, 1), V_CRUISE_MIN, V_CRUISE_MAX))
 
   def update_speed_limit_assist(self, is_metric, LP_SP: custom.LongitudinalPlanSP) -> None:
     resolver = LP_SP.speedLimit.resolver

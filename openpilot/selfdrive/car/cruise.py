@@ -64,6 +64,9 @@ class VCruiseHelper(VCruiseHelperSP):
         # if stock cruise is completely disabled, then we can use our own set speed logic
         self._update_v_speed_limit(CS, CS_IC, _enabled, speed_limit_control, speed_limit_predicative)
         self._update_v_cruise_non_pcm(CS, _enabled, is_metric)
+        if self.icbm_active:
+          self.note_driver_buttons(CS)
+          self.sync_v_cruise_with_car(CS)
         self.update_speed_limit_assist_v_cruise_non_pcm()
         self._apply_curve_speed_cap()
         self.v_cruise_cluster_kph = self.v_cruise_kph
@@ -190,6 +193,11 @@ class VCruiseHelper(VCruiseHelperSP):
     # True: Disallow set speed changes when user confirmed the target set speed during preActive state
     # False: Allow set speed changes as SLA is not requesting user confirmation
     if self.update_speed_limit_assist_pre_active_confirmed(button_type):
+      return
+
+    if self.icbm_active:
+      # the car applied its own step to this press; adopt its result rather than guessing the delta
+      self.start_car_sync()
       return
 
     long_press, v_cruise_delta = VCruiseHelperSP.update_v_cruise_delta(self, long_press, v_cruise_delta)

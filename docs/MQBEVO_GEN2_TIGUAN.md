@@ -30,6 +30,22 @@ its VIN, so select it manually once; the selection persists across reboots (not 
 Panda safety was not modified. The bits it inspects in `GRA_ACC_01` (13 cancel, 16 set, 19 resume)
 are set exactly as before; see `opendbc/car/volkswagen/tests/test_mqbevo_gen2.py::TestGraAccButtonFrame`.
 
+## Findings from the first drive logs (2026-09-06)
+
+* **ICBM walked the set speed down** because the stalk goes to the car, which applies its own step: on this
+  Tiguan a `+` tap jumps to the next multiple of 10 km/h (21 → 40 in the log) while openpilot assumed +1 and
+  then clipped to its 30 km/h floor. ICBM "corrected" the car back down to 30, one press at a time. openpilot
+  now adopts the car's resulting set speed for 1.5 s after any driver button (`cruise_ext.py`,
+  `sync_v_cruise_with_car`). Without a driver press openpilot stays authoritative, so limiters still work.
+* **"Steering Fault May Be Imminent"** came from the HCA-status watchdog counting a harmless 10–20 ms
+  `active → ready → active` blip that the EPS produces once per second (a stock camera 1 Hz message is
+  forwarded just before it; steering resumes on the next frame). The watchdog now counts only excursions that
+  are sustained (≥ 50 ms) or in rapid succession (< 250 ms apart), which still catches the flapping it was
+  written for. Turning **Lane Assist off in the car** is still recommended on Gen 2: the stock request
+  reaches the EPS over Ethernet and cannot be blocked by the harness.
+* The car's ACC minimum set speed is 20 km/h, which is what `MAX 20` on the HUD shows at a standstill.
+* Do not enable sunnypilot Longitudinal Control (alpha) on Gen 2: there are no decoded radar objects.
+
 ## Recommended settings for stock ACC + ICBM
 
 * Cruise: ICBM **on**, Smart Cruise Control Vision on / Map off, Speed Limit **Info** first;
