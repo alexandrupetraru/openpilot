@@ -8,11 +8,12 @@ from opendbc.car.structs import car
 from opendbc.car.volkswagen.values import VolkswagenFlags
 from openpilot.cereal import custom
 from openpilot.common.constants import CV
+from openpilot.common.realtime import DT_CTRL
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.sunnypilot.selfdrive.car.cruise_ext import CAR_SYNC_FRAMES, V_CRUISE_UNSET
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import (IntelligentCruiseButtonManagement,
                                                                                                 DRIVER_ADJUST_FRAMES, RESTORE_DELAY_FRAMES,
-                                                                                                STANDSTILL_SPEED)
+                                                                                                STANDSTILL_SPEED, INACTIVE_TIMER)
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.helpers import get_minimum_set_speed
 
 ButtonEvent = car.CarState.ButtonEvent
@@ -21,6 +22,7 @@ SendButtonState = custom.IntelligentCruiseButtonManagement.SendButtonState
 State = custom.IntelligentCruiseButtonManagement.IntelligentCruiseButtonManagementState
 
 UNSET = float(V_CRUISE_UNSET)  # inactive limiters publish this sentinel (m/s)
+FIRST_PRESS_FRAMES = int(INACTIVE_TIMER / DT_CTRL) + 20  # the state machine arms itself in preActive before the first press
 
 
 class _Params:
@@ -41,10 +43,12 @@ def _lp_sp(v_target_kph=UNSET, vision_kph=None, map_kph=None, assist_kph=None):
   return lp
 
 
-def _cs(set_kph, buttons=(), v_ego_kph=None):
+def _cs(set_kph, buttons=(), v_ego_kph=None, cluster_kph=None):
+  """set_kph: openpilot's own set speed (CS.vCruise); cluster_kph: what the car's ACC currently has (moved by ICBM)."""
   v_ego = (set_kph if v_ego_kph is None else v_ego_kph) * CV.KPH_TO_MS
+  cluster = (set_kph if cluster_kph is None else cluster_kph) * CV.KPH_TO_MS
   CS = car.CarState(vEgo=v_ego, vEgoRaw=v_ego, vCruise=set_kph, vCruiseCluster=set_kph,
-                    cruiseState={"available": True, "enabled": True, "speed": set_kph * CV.KPH_TO_MS, "speedCluster": set_kph * CV.KPH_TO_MS})
+                    cruiseState={"available": True, "enabled": True, "speed": cluster, "speedCluster": cluster})
   CS.buttonEvents = list(buttons)
   return CS
 
@@ -57,15 +61,15 @@ class TestIcbmHoldSetSpeed(OpenpilotTestCase):
   """Hold Set Speed: ICBM keeps the driver's set speed and only lowers it for the limiters (SCC / SLA)."""
 
   def setup_method(self):
-    self.CP = car.CarParams(brand="volkswagen", pcmCruise=True, flags=VolkswagenFlags.MQB_EVO_GEN2)
+    self.CP = car.CarParams(brand="volkswagen", pcmCruise=True, flags=int(VolkswagenFlags.MQB_EVO_GEN2))
     self.CP_SP = custom.CarParamsSP(pcmCruiseSpeed=False)
 
   def _icbm(self, hold=True):
     return IntelligentCruiseButtonManagement(self.CP, self.CP_SP, params=_Params(hold))
 
-  def _run(self, icbm, set_kph, lp_sp, n=1, buttons=(), force_decel=False, v_ego_kph=None):
+  def _run(self, icbm, set_kph, lp_sp, n=1, buttons=(), force_decel=False, v_ego_kph=None, cluster_kph=None):
     for _ in range(n):
-      icbm.run(_cs(set_kph, buttons, v_ego_kph), _cc(), lp_sp, is_metric=True, force_decel=force_decel)
+      icbm.run(_cs(set_kph, buttons, v_ego_kph, cluster_kph), _cc(), lp_sp, is_metric=True, force_decel=force_decel)
       buttons = ()
     return icbm
 
@@ -75,22 +79,22 @@ class TestIcbmHoldSetSpeed(OpenpilotTestCase):
     assert icbm.v_target == 40 and icbm.state == State.holding and icbm.cruise_button == SendButtonState.none
 
   def test_legacy_mode_still_follows_the_plan(self):
-    icbm = self._run(self._icbm(hold=False), 40, _lp_sp(v_target_kph=25), n=50)
+    icbm = self._run(self._icbm(hold=False), 40, _lp_sp(v_target_kph=25), n=FIRST_PRESS_FRAMES)
     assert icbm.v_target == 25 and icbm.state == State.decreasing and icbm.cruise_button == SendButtonState.decrease
 
   def test_limiters_lower_the_target_and_the_set_speed_comes_back(self):
-    icbm = self._run(self._icbm(), 60, _lp_sp(vision_kph=45), n=50)
+    icbm = self._run(self._icbm(), 60, _lp_sp(vision_kph=45), n=FIRST_PRESS_FRAMES)
     assert icbm.v_target == 45 and icbm.state == State.decreasing
-    icbm = self._run(icbm, 45, _lp_sp(vision_kph=45), n=50)
+    icbm = self._run(icbm, 60, _lp_sp(vision_kph=45), n=50, cluster_kph=45)  # the car followed the presses down
     assert icbm.state == State.holding
-    icbm = self._run(icbm, 45, _lp_sp(), n=RESTORE_DELAY_FRAMES - 10)  # curve over: nothing lower than the set speed anymore
+    icbm = self._run(icbm, 60, _lp_sp(), n=RESTORE_DELAY_FRAMES - 10, cluster_kph=45)  # curve over: nothing lower than the set speed
     assert icbm.v_target == 60 and icbm.cruise_button == SendButtonState.none  # but not raised back yet
-    icbm = self._run(icbm, 45, _lp_sp(), n=20)
+    icbm = self._run(icbm, 60, _lp_sp(), n=20, cluster_kph=45)
     assert icbm.state == State.increasing and icbm.cruise_button == SendButtonState.increase
 
   def test_speed_limit_cap_and_release(self):
     """70 set, 50 zone -> 50; limit rises to 90 -> back to the driver's 70, not 90."""
-    icbm = self._run(self._icbm(), 70, _lp_sp(assist_kph=50), n=50)
+    icbm = self._run(self._icbm(), 70, _lp_sp(assist_kph=50), n=FIRST_PRESS_FRAMES)
     assert icbm.v_target == 50 and icbm.state == State.decreasing
     icbm = self._run(icbm, 70, _lp_sp(assist_kph=90), n=RESTORE_DELAY_FRAMES + 20)
     assert icbm.v_target == 70 and icbm.state == State.holding
@@ -105,7 +109,7 @@ class TestIcbmHoldSetSpeed(OpenpilotTestCase):
     assert icbm.v_target == 50 and icbm.cruise_button == SendButtonState.none
 
   def test_force_decel_drives_the_target_to_the_floor(self):
-    icbm = self._run(self._icbm(), 50, _lp_sp(), n=50, force_decel=True)
+    icbm = self._run(self._icbm(), 50, _lp_sp(), n=FIRST_PRESS_FRAMES, force_decel=True)
     assert icbm.v_target == 0 and icbm.v_cruise_min == 20 and icbm.state == State.decreasing
 
   def test_never_asks_for_more_than_the_driver_set(self):
@@ -114,24 +118,26 @@ class TestIcbmHoldSetSpeed(OpenpilotTestCase):
 
   def test_pauses_after_a_driver_press(self):
     """The car applies its own step to the stalk press and openpilot adopts it; ICBM must not fight either."""
-    icbm = self._run(self._icbm(), 60, _lp_sp(vision_kph=45), n=50)
+    icbm = self._run(self._icbm(), 60, _lp_sp(vision_kph=45), n=FIRST_PRESS_FRAMES)
     assert icbm.is_ready and icbm.cruise_button == SendButtonState.decrease
     icbm = self._run(icbm, 60, _lp_sp(vision_kph=45), buttons=[ButtonEvent(type=ButtonType.accelCruise, pressed=True)])
     assert not icbm.is_ready and icbm.cruise_button == SendButtonState.none and icbm.driver_adjust_frames == DRIVER_ADJUST_FRAMES == CAR_SYNC_FRAMES
-    icbm = self._run(icbm, 60, _lp_sp(vision_kph=45), n=DRIVER_ADJUST_FRAMES - 1)
+    icbm = self._run(icbm, 60, _lp_sp(vision_kph=45), n=10, buttons=[ButtonEvent(type=ButtonType.accelCruise, pressed=False)])
+    assert not icbm.is_ready and icbm.driver_adjust_frames == DRIVER_ADJUST_FRAMES - 9  # the release re-arms the pause
+    icbm = self._run(icbm, 60, _lp_sp(vision_kph=45), n=DRIVER_ADJUST_FRAMES - 10)
     assert not icbm.is_ready
-    icbm = self._run(icbm, 60, _lp_sp(vision_kph=45), n=5)
+    icbm = self._run(icbm, 60, _lp_sp(vision_kph=45), n=FIRST_PRESS_FRAMES)  # re-armed: preActive timer runs again
     assert icbm.is_ready and icbm.cruise_button == SendButtonState.decrease
 
   def test_lowering_is_never_delayed_raising_waits(self):
-    icbm = self._run(self._icbm(), 60, _lp_sp(vision_kph=45), n=2)
-    assert icbm.cruise_button == SendButtonState.decrease  # first frames already press '-'
+    icbm = self._run(self._icbm(), 60, _lp_sp(vision_kph=45), n=FIRST_PRESS_FRAMES)
+    assert icbm.cruise_button == SendButtonState.decrease  # lowering starts as soon as the state machine is armed
     for _ in range(3):  # a limiter that flickers on/off never produces a '+' press
-      icbm = self._run(icbm, 45, _lp_sp(), n=RESTORE_DELAY_FRAMES // 2)
+      icbm = self._run(icbm, 60, _lp_sp(), n=RESTORE_DELAY_FRAMES // 2, cluster_kph=45)
       assert icbm.cruise_button == SendButtonState.none
-      icbm = self._run(icbm, 45, _lp_sp(vision_kph=45), n=5)
+      icbm = self._run(icbm, 60, _lp_sp(vision_kph=45), n=5, cluster_kph=45)
       assert icbm.cruise_button == SendButtonState.none
-    icbm = self._run(icbm, 45, _lp_sp(), n=RESTORE_DELAY_FRAMES + 10)
+    icbm = self._run(icbm, 60, _lp_sp(), n=RESTORE_DELAY_FRAMES + 10, cluster_kph=45)
     assert icbm.cruise_button == SendButtonState.increase
 
   def test_no_presses_near_standstill(self):
@@ -160,8 +166,8 @@ class TestIcbmMinimumSetSpeed(OpenpilotTestCase):
     assert get_minimum_set_speed(True, car.CarParams(brand="volkswagen")) == 30  # MQB, no Gen 2 flag
 
   def test_mqb_evo_gen2_floor(self):
-    CP = car.CarParams(brand="volkswagen", flags=VolkswagenFlags.MQB_EVO_GEN2)
+    CP = car.CarParams(brand="volkswagen", flags=int(VolkswagenFlags.MQB_EVO_GEN2))
     assert get_minimum_set_speed(True, CP) == 20 and get_minimum_set_speed(False, CP) == 12
 
   def test_other_brands_untouched(self):
-    assert get_minimum_set_speed(True, car.CarParams(brand="hyundai", flags=VolkswagenFlags.MQB_EVO_GEN2)) == 30
+    assert get_minimum_set_speed(True, car.CarParams(brand="hyundai", flags=int(VolkswagenFlags.MQB_EVO_GEN2))) == 30

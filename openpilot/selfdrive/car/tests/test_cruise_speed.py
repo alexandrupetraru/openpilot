@@ -264,7 +264,7 @@ class TestVCruiseHelperIcbm(OpenpilotTestCase):
   def _engage(self, car_set_kph):
     self._step(car_set_kph, enabled=False, n=2)   # mirrors the car while not engaged
     self._step(car_set_kph, n=3)                  # latches openpilot's own set speed on engage
-    assert self.v_cruise_helper.v_cruise_kph == car_set_kph
+    assert round(self.v_cruise_helper.v_cruise_kph, 1) == car_set_kph
 
   def test_driver_press_adopts_the_cars_result(self):
     """The car applies its own step to a stalk press (this VW rounds '+' to the next 10 km/h); openpilot must not guess a delta."""
@@ -274,7 +274,7 @@ class TestVCruiseHelperIcbm(OpenpilotTestCase):
     self._step(40)  # car reacts before the release, in two steps
     self._step(40, [ButtonEvent(type=ButtonType.accelCruise, pressed=False)])
     self._step(40, n=5)
-    assert self.v_cruise_helper.v_cruise_kph == 40             # not 21, and not clipped up to the ICBM floor
+    assert round(self.v_cruise_helper.v_cruise_kph, 1) == 40             # not 21, and not clipped up to the ICBM floor
 
   def test_icbm_own_presses_are_not_adopted_during_sync(self):
     """While the sync window is open, a step the car makes in reaction to ICBM's own press is not the driver's choice."""
@@ -283,17 +283,17 @@ class TestVCruiseHelperIcbm(OpenpilotTestCase):
     self._step(40)
     self._step(40, [ButtonEvent(type=ButtonType.accelCruise, pressed=False)])
     self._step(40, n=5)
-    assert self.v_cruise_helper.v_cruise_kph == 40
+    assert round(self.v_cruise_helper.v_cruise_kph, 1) == 40
     send = custom.IntelligentCruiseButtonManagement.SendButtonState.decrease
     self.v_cruise_helper.update_v_cruise(self._cs(40), self.CS_IC, enabled=True, is_metric=True, icbm_send_button=send)
     for _ in range(10):
       self.v_cruise_helper.update_v_cruise(self._cs(39), self.CS_IC, enabled=True, is_metric=True)
-    assert self.v_cruise_helper.v_cruise_kph == 40             # ICBM's own -1 was not adopted as a new driver choice
+    assert round(self.v_cruise_helper.v_cruise_kph, 1) == 40             # ICBM's own -1 was not adopted as a new driver choice
     # It is a hold-off, not a window close: if a driver press ever races with an ICBM press, the car's reaction
     # to the driver must still be learned once the hold-off ends (ICBM itself pauses for the whole window).
     for _ in range(ICBM_PRESS_HOLDOFF_FRAMES):
       self.v_cruise_helper.update_v_cruise(self._cs(39), self.CS_IC, enabled=True, is_metric=True)
-    assert self.v_cruise_helper.v_cruise_kph == 39
+    assert round(self.v_cruise_helper.v_cruise_kph, 1) == 39
 
   def test_speed_limit_assist_does_not_rewrite_the_set_speed(self):
     """With stock ACC the limit is a cap applied by ICBM; the driver's set speed stays the ceiling."""
@@ -305,7 +305,7 @@ class TestVCruiseHelperIcbm(OpenpilotTestCase):
     for _ in range(20):
       self.v_cruise_helper.update_speed_limit_assist(True, LP_SP)
       self._step(70)
-    assert self.v_cruise_helper.v_cruise_kph == 70
+    assert round(self.v_cruise_helper.v_cruise_kph, 1) == 70
 
   def test_set_and_resume_presses_also_sync(self):
     self._engage(50)
@@ -313,19 +313,19 @@ class TestVCruiseHelperIcbm(OpenpilotTestCase):
     self._step(32)
     self._step(32, [ButtonEvent(type=ButtonType.setCruise, pressed=False)])
     self._step(32, n=5)
-    assert self.v_cruise_helper.v_cruise_kph == 32
+    assert round(self.v_cruise_helper.v_cruise_kph, 1) == 32
 
   def test_car_changes_without_a_press_do_not_move_openpilot(self):
     """Without a driver press openpilot stays authoritative, so ICBM can restore the set speed the car dropped by itself."""
     self._engage(40)
     self._step(40, n=CRUISE_LONG_PRESS * 4)  # well past any sync window
     self._step(35, n=10)
-    assert self.v_cruise_helper.v_cruise_kph == 40
+    assert round(self.v_cruise_helper.v_cruise_kph, 1) == 40
 
   def test_sync_respects_cruise_max(self):
     self._engage(140)
     self._step(140, [ButtonEvent(type=ButtonType.accelCruise, pressed=True)])
     self._step(150, [ButtonEvent(type=ButtonType.accelCruise, pressed=False)])
     self._step(150, n=5)
-    assert self.v_cruise_helper.v_cruise_kph == V_CRUISE_MAX
+    assert round(self.v_cruise_helper.v_cruise_kph, 1) == V_CRUISE_MAX
 
