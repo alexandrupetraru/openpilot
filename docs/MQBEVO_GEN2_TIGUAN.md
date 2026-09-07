@@ -60,6 +60,15 @@ are set exactly as before; see `opendbc/car/volkswagen/tests/test_mqbevo_gen2.py
   speed limits (50/30/20 zones in the drive logs) to the "Car" speed-limit source; camera sign recognition is
   not on CAN on Gen 2 and stays unavailable. Use **Car First** with OSM as fallback.
 
+## Third update (2026-09-07): Speed Limit Assist as a cap under your set speed
+
+On a stock-ACC car SLA used the "confirmation" flow: every new limit gave you 5 s to press `-`/`+`, otherwise it
+went inactive, and any set-speed change also cancelled it (below 80 km/h a confirmation was always required).
+When it did activate it replaced your set speed with the limit. Now, with ICBM, SLA works like the car's own
+speed-limit response: your set speed is the ceiling, `limit + offset` is applied underneath it automatically, and
+the target goes back up to your set speed (never above) when the limit rises. Curves from SCC Vision / Map are
+applied on top (lowest wins). If no limit is known, the last known one keeps applying ("Auto adjusting to last speed limit").
+
 ## Recommended settings for stock ACC + ICBM
 
 * Cruise: ICBM **on**, Hold Set Speed **on**, Smart Cruise Control Vision on / Map off until Romania OSM is

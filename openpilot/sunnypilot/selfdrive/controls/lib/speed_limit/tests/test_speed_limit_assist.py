@@ -361,3 +361,75 @@ class TestButtonStateTrackerSLAIntegration(OpenpilotTestCase):
     self.sla.update_buttons(self.tracker.release_toggle)
     time.sleep(CRUISE_BUTTON_CONFIRM_HOLD + 0.1)
     assert not self.sla._get_button_release(req_plus=True, req_minus=False)
+
+
+class TestSpeedLimitAssistIcbm(OpenpilotTestCase):
+  """Stock ACC + Intelligent Cruise Button Management: the limit is a cap under the driver's set speed.
+  No confirmation flow, no set-speed rewrite, back up to the set speed when the limit rises."""
+
+  def setup_method(self):
+    self.params = Params()
+    self.params.put("IsReleaseSpBranch", True, block=True)
+    self.params.put("SpeedLimitMode", int(Mode.assist), block=True)
+    self.params.put_bool("IsMetric", True, block=True)
+    self.params.put("SpeedLimitOffsetType", 0, block=True)
+    self.params.put("SpeedLimitValueOffset", 0, block=True)
+    self.events_sp = EventsSP()
+    CP = car.CarParams(brand="volkswagen", pcmCruise=True, openpilotLongitudinalControl=False)
+    CP_SP = custom.CarParamsSP(pcmCruiseSpeed=False)
+    self.sla = SpeedLimitAssist(CP, CP_SP)
+    assert self.sla.icbm_long and not self.sla.pcm_op_long and self.sla.enabled
+
+  def _run(self, seconds, v_ego_kph, set_kph, limit_kph, has_limit=True, enabled=True):
+    for _ in range(int(seconds / DT_MDL)):
+      self.sla.update(enabled, False, v_ego_kph * CV.KPH_TO_MS, 0., set_kph * CV.KPH_TO_MS, limit_kph * CV.KPH_TO_MS,
+                      limit_kph * CV.KPH_TO_MS, has_limit, 0, self.events_sp)
+    return self.sla
+
+  def test_caps_without_confirmation(self):
+    self._run(2., v_ego_kph=70, set_kph=70, limit_kph=50)
+    assert self.sla.state == SpeedLimitAssistState.adapting and self.sla.is_active
+    assert round(self.sla.output_v_target * CV.MS_TO_KPH) == 50
+    self._run(2., v_ego_kph=50, set_kph=70, limit_kph=50)
+    assert self.sla.state == SpeedLimitAssistState.active
+    assert round(self.sla.output_v_target * CV.MS_TO_KPH) == 50
+
+  def test_never_enters_the_confirmation_states(self):
+    seen = set()
+    for limit in (50, 30, 90, 50, 130):
+      self._run(1., v_ego_kph=60, set_kph=70, limit_kph=limit)
+      seen.add(self.sla.state)
+    assert SpeedLimitAssistState.preActive not in seen and SpeedLimitAssistState.inactive not in seen
+    assert self.sla.is_active and round(self.sla.output_v_target * CV.MS_TO_KPH) == 130  # ceiling is applied by ICBM, not here
+
+  def test_set_speed_change_keeps_the_cap(self):
+    self._run(2., v_ego_kph=50, set_kph=70, limit_kph=50)
+    self._run(1., v_ego_kph=50, set_kph=90, limit_kph=50)   # driver raises the set speed
+    assert self.sla.is_active and round(self.sla.output_v_target * CV.MS_TO_KPH) == 50
+
+  def test_no_limit_is_pending_and_unset(self):
+    self._run(2., v_ego_kph=50, set_kph=70, limit_kph=0, has_limit=False)
+    assert self.sla.state == SpeedLimitAssistState.pending and not self.sla.is_active
+    assert self.sla.output_v_target == V_CRUISE_UNSET
+
+  def test_disengaged_or_mode_off_is_disabled(self):
+    self._run(2., v_ego_kph=50, set_kph=70, limit_kph=50)
+    self._run(1., v_ego_kph=50, set_kph=70, limit_kph=50, enabled=False)
+    assert self.sla.state == SpeedLimitAssistState.disabled and self.sla.output_v_target == V_CRUISE_UNSET
+    self.params.put("SpeedLimitMode", int(Mode.warning), block=True)
+    self._run(PARAMS_UPDATE_PERIOD + 1., v_ego_kph=50, set_kph=70, limit_kph=50)
+    assert self.sla.state == SpeedLimitAssistState.disabled
+
+  def test_settles_before_capping_after_engage(self):
+    self._run(0.3, v_ego_kph=70, set_kph=70, limit_kph=50)
+    assert self.sla.state == SpeedLimitAssistState.disabled
+    self._run(0.5, v_ego_kph=70, set_kph=70, limit_kph=50)
+    assert self.sla.is_active
+
+  def test_events_say_auto_adjusting_not_set_speed_changed(self):
+    self._run(2., v_ego_kph=50, set_kph=70, limit_kph=50)
+    names = list(self.events_sp.names)
+    assert custom.OnroadEventSP.EventName.speedLimitActive in names
+    assert custom.OnroadEventSP.EventName.speedLimitChanged not in names
+    assert custom.OnroadEventSP.EventName.speedLimitPreActive not in names
+

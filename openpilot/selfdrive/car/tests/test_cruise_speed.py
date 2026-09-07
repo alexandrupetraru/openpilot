@@ -295,6 +295,18 @@ class TestVCruiseHelperIcbm(OpenpilotTestCase):
       self.v_cruise_helper.update_v_cruise(self._cs(39), self.CS_IC, enabled=True, is_metric=True)
     assert self.v_cruise_helper.v_cruise_kph == 39
 
+  def test_speed_limit_assist_does_not_rewrite_the_set_speed(self):
+    """With stock ACC the limit is a cap applied by ICBM; the driver's set speed stays the ceiling."""
+    self._engage(70)
+    LP_SP = custom.LongitudinalPlanSP()
+    LP_SP.speedLimit.resolver.speedLimitValid = True
+    LP_SP.speedLimit.resolver.speedLimitFinalLast = 50 * CV.KPH_TO_MS
+    LP_SP.speedLimit.assist.state = custom.LongitudinalPlanSP.SpeedLimit.AssistState.active
+    for _ in range(20):
+      self.v_cruise_helper.update_speed_limit_assist(True, LP_SP)
+      self._step(70)
+    assert self.v_cruise_helper.v_cruise_kph == 70
+
   def test_set_and_resume_presses_also_sync(self):
     self._engage(50)
     self._step(50, [ButtonEvent(type=ButtonType.setCruise, pressed=True)])

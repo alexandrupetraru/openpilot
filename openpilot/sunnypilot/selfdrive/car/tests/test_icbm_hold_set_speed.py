@@ -84,6 +84,13 @@ class TestIcbmHoldSetSpeed(OpenpilotTestCase):
     icbm = self._run(icbm, 45, _lp_sp(), n=50)  # curve over: nothing lower than the set speed anymore
     assert icbm.v_target == 60 and icbm.state == State.increasing and icbm.cruise_button == SendButtonState.increase
 
+  def test_speed_limit_cap_and_release(self):
+    """70 set, 50 zone -> 50; limit rises to 90 -> back to the driver's 70, not 90."""
+    icbm = self._run(self._icbm(), 70, _lp_sp(assist_kph=50), n=50)
+    assert icbm.v_target == 50 and icbm.state == State.decreasing
+    icbm = self._run(icbm, 70, _lp_sp(assist_kph=90), n=50)
+    assert icbm.v_target == 70 and icbm.state == State.holding
+
   def test_lowest_limiter_wins(self):
     icbm = self._run(self._icbm(), 90, _lp_sp(vision_kph=70, map_kph=50, assist_kph=80), n=50)
     assert icbm.v_target == 50

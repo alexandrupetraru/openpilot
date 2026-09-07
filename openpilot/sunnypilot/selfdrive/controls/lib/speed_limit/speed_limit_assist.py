@@ -88,6 +88,9 @@ class SpeedLimitAssist:
     self.state = SpeedLimitAssistState.disabled
     self._state_prev = SpeedLimitAssistState.disabled
     self.pcm_op_long = CP.openpilotLongitudinalControl and CP.pcmCruise
+    # Stock ACC executes and openpilot only nudges the set speed through the cruise buttons (ICBM). The driver's
+    # set speed is the ceiling; the limit is applied underneath it as a cap, like the car's own speed limit response.
+    self.icbm_long = not CP.openpilotLongitudinalControl and CP.pcmCruise and not CP_SP.pcmCruiseSpeed
 
     self._plus_hold = 0.
     self._minus_hold = 0.
@@ -121,7 +124,7 @@ class SpeedLimitAssist:
     return bool(self.v_cruise_cluster_conv < CONFIRM_SPEED_THRESHOLD[self.is_metric])
 
   def update_active_event(self, events_sp: EventsSP) -> None:
-    if self.v_cruise_cluster_below_confirm_speed_threshold:
+    if self.v_cruise_cluster_below_confirm_speed_threshold and not self.icbm_long:  # ICBM never rewrites the set speed
       events_sp.add(EventNameSP.speedLimitChanged)
     else:
       events_sp.add(EventNameSP.speedLimitActive)
@@ -360,6 +363,29 @@ class SpeedLimitAssist:
 
     return enabled, active
 
+  def update_state_machine_icbm(self):
+    # No confirmation and no set-speed rewrite: the driver chose the ceiling, the button manager applies
+    # min(set speed, limit + offset) and goes back up to the set speed on its own when the limit rises.
+    self.long_engaged_timer = max(0, self.long_engaged_timer - 1)
+
+    if not self.long_enabled or not self.enabled:
+      self.state = SpeedLimitAssistState.disabled
+    else:
+      if not self.long_enabled_prev:
+        self.long_engaged_timer = int(DISABLED_GUARD_PERIOD / DT_MDL)
+
+      if self.state == SpeedLimitAssistState.disabled and self.long_engaged_timer > 0:
+        pass  # settle after engaging before capping
+      elif self._has_speed_limit:
+        self.state = SpeedLimitAssistState.adapting if self.v_offset < LIMIT_SPEED_OFFSET_TH else SpeedLimitAssistState.active
+      else:
+        self.state = SpeedLimitAssistState.pending
+
+    enabled = self.state in ENABLED_STATES
+    active = self.state in ACTIVE_STATES
+
+    return enabled, active
+
   def update_events(self, events_sp: EventsSP) -> None:
     if self.state == SpeedLimitAssistState.preActive:
       events_sp.add(EventNameSP.speedLimitPreActive)
@@ -396,6 +422,8 @@ class SpeedLimitAssist:
     self._state_prev = self.state
     if self.pcm_op_long:
       self.is_enabled, self.is_active = self.update_state_machine_pcm_op_long()
+    elif self.icbm_long:
+      self.is_enabled, self.is_active = self.update_state_machine_icbm()
     else:
       self.is_enabled, self.is_active = self.update_state_machine_non_pcm_long()
 
