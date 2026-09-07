@@ -94,7 +94,8 @@ class TestMonitoring(OpenpilotTestCase):
 
   # no face -> wheeltouch red, sustained past the no-response timeout -> unavailability response + lockout
   def test_invisible_lockout(self):
-    _, d_status = self._run_seq(always_no_face, always_false, always_true, always_false)
+    # 2x timespan: the first (1 min) lockout may expire right at the end of a single span; the second one must be active
+    _, d_status = self._run_seq(always_no_face * 2, always_false * 2, always_true * 2, always_false * 2)
     assert d_status.active_policy == log.DriverMonitoringState.MonitoringPolicy.wheeltouch
     assert d_status.lockout_active
     assert d_status.lockout_count >= 1
@@ -154,7 +155,9 @@ class TestMonitoring(OpenpilotTestCase):
   # engaged, invisible driver, down to orange, driver touches wheel; then down to orange again, driver appears
   #  - both actions should clear the alert, but momentary appearance should not
   def test_sometimes_transparent_commuter(self):
-    for _visible_time in (0.5, 10):
+    # the wheel-touch awareness refills at the vision rate while the face is visible: a full refill takes ALERT_3_TIMEOUT
+    _long_visible = dm_settings._VISION_POLICY_ALERT_3_TIMEOUT
+    for _visible_time in (0.5, _long_visible):
       ds_vector = always_no_face[:]*2
       interaction_vector = always_false[:]*2
       ds_vector[int((2*INVISIBLE_SECONDS_TO_ORANGE+1)/DT_DMON):int((2*INVISIBLE_SECONDS_TO_ORANGE+1+_visible_time)/DT_DMON)] = \
@@ -167,7 +170,7 @@ class TestMonitoring(OpenpilotTestCase):
       if _visible_time == 0.5:
         assert alert_lvls[int((INVISIBLE_SECONDS_TO_ORANGE*2+1-0.1)/DT_DMON)] == 2
         assert alert_lvls[int((INVISIBLE_SECONDS_TO_ORANGE*2+1+0.1+_visible_time)/DT_DMON)] == 2
-      elif _visible_time == 10:
+      elif _visible_time == _long_visible:
         assert alert_lvls[int((INVISIBLE_SECONDS_TO_ORANGE*2+1-0.1)/DT_DMON)] == 2
         assert alert_lvls[int((INVISIBLE_SECONDS_TO_ORANGE*2+1+0.1+_visible_time)/DT_DMON)] == 0
 

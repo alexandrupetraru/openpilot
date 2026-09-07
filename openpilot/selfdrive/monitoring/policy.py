@@ -28,12 +28,15 @@ class DRIVER_MONITOR_SETTINGS:
     # https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=OJ:L_202501899
     self._ALERT_MIN_SPEED = 2.8  # 10 km/h
 
-    self._WHEELTOUCH_POLICY_ALERT_1_TIMEOUT = 5.
-    self._WHEELTOUCH_POLICY_ALERT_2_TIMEOUT = 15.
-    self._WHEELTOUCH_POLICY_ALERT_3_TIMEOUT = 25.
-    self._VISION_POLICY_ALERT_1_TIMEOUT = 5.
-    self._VISION_POLICY_ALERT_2_TIMEOUT = 8.
-    self._VISION_POLICY_ALERT_3_TIMEOUT = 13.
+    # Alert timings doubled from upstream (5/15/25 and 5/8/13 s) by owner choice, trading some of the EU-regulation
+    # margin for comfort. Alert thresholds and the awareness step are derived from these, so scaling all six keeps
+    # the state machine consistent; the red-alert escalation (no-response force decel, lockout) is unchanged.
+    self._WHEELTOUCH_POLICY_ALERT_1_TIMEOUT = 10.
+    self._WHEELTOUCH_POLICY_ALERT_2_TIMEOUT = 30.
+    self._WHEELTOUCH_POLICY_ALERT_3_TIMEOUT = 50.
+    self._VISION_POLICY_ALERT_1_TIMEOUT = 10.
+    self._VISION_POLICY_ALERT_2_TIMEOUT = 16.
+    self._VISION_POLICY_ALERT_3_TIMEOUT = 26.
 
     # no response = alert_3 sustained for certain amount of time
     self._NO_RESPONSE_TIMEOUT = 5.

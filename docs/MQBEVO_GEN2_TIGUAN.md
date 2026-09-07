@@ -84,6 +84,21 @@ applied on top (lowest wins). If no limit is known, the last known one keeps app
   `cruiseState.standstill` is never set on this car. Left unchanged on purpose: a correct flag would also enable
   openpilot's automatic RESUME after a lead pulls away (controlsd), which is a behaviour change to decide on separately.
 
+## Driver monitoring timings (2026-09-08)
+
+Alert timers doubled by owner choice (`selfdrive/monitoring/policy.py`), balancing comfort against the upstream
+EU-regulation margin. No alerts below 10 km/h as before.
+
+| Policy | Alert 1 | Alert 2 (orange, chime) | Alert 3 (red, continuous) |
+|---|---|---|---|
+| Vision (face seen, looking away / eyes closed / phone) | 10 s (was 5) | 16 s (was 8) | 26 s (was 13) |
+| Wheel-touch (no face, or model uncertain 10 s) | 10 s (was 5) | 30 s (was 15) | 50 s (was 25) |
+
+Unchanged: recovery when you look back (proportionally the same), wheel touch resets in wheel-touch policy, red
+escalation (5 s of ignored red -> force decel, ICBM walks the set speed to 20 km/h, steering assist suspended),
+lockout after two reds or one ignored red (1 / 5 / 15 / 30 min). Side effect of the scaling: after an orange
+"no face" alert, being visible refills the wheel-touch budget in ~16 s instead of ~8 s.
+
 ## Recommended settings for stock ACC + ICBM
 
 * Cruise: ICBM **on**, Hold Set Speed **on**, Smart Cruise Control Vision on / Map off until Romania OSM is
