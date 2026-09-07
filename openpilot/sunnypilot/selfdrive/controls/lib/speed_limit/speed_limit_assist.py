@@ -40,6 +40,9 @@ LIMIT_MAX_ACC = 1.0   # m/s^2 Maximum acceleration allowed for limit controllers
 LIMIT_MIN_SPEED = 8.33  # m/s, Minimum speed limit to provide as solution on limit controllers.
 LIMIT_SPEED_OFFSET_TH = -1.  # m/s Maximum offset between speed limit and current speed for adapting state.
 V_CRUISE_UNSET = 255.
+# ICBM cap mode: the button manager cannot set less than 20 km/h anyway, and the car's map reports values like
+# 5 km/h on parking areas and service roads; a "limit" below this is not treated as a limit.
+ICBM_CAP_MIN_LIMIT = 20 * CV.KPH_TO_MS
 
 CRUISE_BUTTONS_PLUS = (ButtonType.accelCruise, ButtonType.resumeCruise)
 CRUISE_BUTTONS_MINUS = (ButtonType.decelCruise, ButtonType.setCruise)
@@ -376,7 +379,7 @@ class SpeedLimitAssist:
 
       if self.state == SpeedLimitAssistState.disabled and self.long_engaged_timer > 0:
         pass  # settle after engaging before capping
-      elif self._has_speed_limit:
+      elif self._has_speed_limit and self._speed_limit_final_last >= ICBM_CAP_MIN_LIMIT:
         self.state = SpeedLimitAssistState.adapting if self.v_offset < LIMIT_SPEED_OFFSET_TH else SpeedLimitAssistState.active
       else:
         self.state = SpeedLimitAssistState.pending

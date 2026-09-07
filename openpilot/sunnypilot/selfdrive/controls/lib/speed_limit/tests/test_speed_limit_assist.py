@@ -426,6 +426,13 @@ class TestSpeedLimitAssistIcbm(OpenpilotTestCase):
     self._run(0.5, v_ego_kph=70, set_kph=70, limit_kph=50)
     assert self.sla.is_active
 
+  def test_limits_below_the_icbm_floor_are_not_limits(self):
+    """The car's map reports 5 km/h on parking areas; that must not pull a 30 km/h drive down to the floor."""
+    self._run(2., v_ego_kph=32, set_kph=40, limit_kph=10)   # 5 + 5 offset as logged
+    assert self.sla.state == SpeedLimitAssistState.pending and self.sla.output_v_target == V_CRUISE_UNSET
+    self._run(2., v_ego_kph=32, set_kph=40, limit_kph=20)
+    assert self.sla.is_active and round(self.sla.output_v_target * CV.MS_TO_KPH) == 20
+
   def test_events_say_auto_adjusting_not_set_speed_changed(self):
     self._run(2., v_ego_kph=50, set_kph=70, limit_kph=50)
     names = list(self.events_sp.names)

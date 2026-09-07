@@ -69,6 +69,21 @@ speed-limit response: your set speed is the ceiling, `limit + offset` is applied
 the target goes back up to your set speed (never above) when the limit rises. Curves from SCC Vision / Map are
 applied on top (lowest wins). If no limit is known, the last known one keeps applying ("Auto adjusting to last speed limit").
 
+### Verified against the 2026-09-07 drive logs (routes 9, a, b)
+
+* Hold mode works as designed: openpilot's set speed stays where you put it, the car's set speed only moves when
+  SCC Vision / Map lowers it (e.g. 70 -> 28 in a bend, then back to 70). The "Car" speed-limit source delivers
+  50 / 30 / 20 zones from the car's map on bus 0.
+* SLA confirmed broken as described: 70 set in a 50 zone for minutes with SLA `inactive`; a 30 zone at 70 km/h
+  (route 9, 817 s) only produced a `preActive` prompt. Fixed by the cap mode above.
+* Found and fixed from the same logs: ICBM kept pressing `+` (= RESUME on VW) while braking from 34 to 1 km/h
+  (route a, 175-181 s). ICBM now never presses below 7 km/h or while the car reports standstill. Raising the set
+  speed back up now waits 2 s after a limiter clears (no more 70 -> 54 -> 70 bursts when Vision flickers), lowering
+  is immediate. Map "limits" of 5 km/h on parking areas are ignored by the cap (anything under 20 km/h).
+* Note: the car reports `ESC_50.Motion_State` = 1 at standstill and 0 when moving; the code expects 3, so
+  `cruiseState.standstill` is never set on this car. Left unchanged on purpose: a correct flag would also enable
+  openpilot's automatic RESUME after a lead pulls away (controlsd), which is a behaviour change to decide on separately.
+
 ## Recommended settings for stock ACC + ICBM
 
 * Cruise: ICBM **on**, Hold Set Speed **on**, Smart Cruise Control Vision on / Map off until Romania OSM is

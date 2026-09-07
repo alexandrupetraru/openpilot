@@ -23,6 +23,13 @@ DRIVER_CRUISE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonT
 # (see VCruiseHelperSP.sync_v_cruise_with_car); ICBM stays quiet for the same window so it never fights that.
 DRIVER_ADJUST_FRAMES = CAR_SYNC_FRAMES
 
+# Never press below walking speed: on VW the '+' press is RESUME, which makes an ACC that is holding at a stop
+# drive off. The car's own standstill flag is not reliable on every platform, so gate on speed as well.
+STANDSTILL_SPEED = 2.0  # m/s, ~7 km/h
+# Hold mode: wait before raising the set speed back up after a limiter clears, so a curve / limit that flickers
+# for a second does not turn into a burst of -/+ presses. Lowering is never delayed.
+RESTORE_DELAY_FRAMES = int(2.0 / DT_CTRL)
+
 ALLOWED_SPEED_THRESHOLD = 1.8  # m/s, ~4 MPH
 HYST_GAP = 0.0  # currently disabled; TODO-SP: might need to be brand-specific
 INACTIVE_TIMER = 0.4
@@ -44,6 +51,7 @@ class IntelligentCruiseButtonManagement:
     # and the car is never asked for more than the driver set.
     self.hold_set_speed = True
     self.driver_adjust_frames = 0
+    self.raise_frames = 0
     self.read_params()
 
     self.v_target = 0
@@ -75,6 +83,10 @@ class IntelligentCruiseButtonManagement:
     return min([min(CS.vCruise, V_CRUISE_MAX) * CV.KPH_TO_MS] + limits)
 
   @property
+  def restore_allowed(self) -> bool:
+    return not self.hold_set_speed or self.raise_frames >= RESTORE_DELAY_FRAMES
+
+  @property
   def v_cruise_equal(self) -> bool:
     return self.v_target == self.v_cruise_cluster
 
@@ -87,6 +99,7 @@ class IntelligentCruiseButtonManagement:
 
     self.v_target = round(self.v_target_ms_last * speed_conv)
     self.v_cruise_min = get_minimum_set_speed(self.is_metric, self.CP)
+    self.raise_frames = self.raise_frames + 1 if self.v_target > self.v_cruise_cluster else 0
     self.v_cruise_cluster = round(CS.cruiseState.speedCluster * speed_conv)
 
   def update_state_machine(self) -> custom.IntelligentCruiseButtonManagement.SendButtonState:
@@ -104,7 +117,7 @@ class IntelligentCruiseButtonManagement:
             if self.v_cruise_equal:
               self.state = State.holding
 
-            elif self.v_target > self.v_cruise_cluster:
+            elif self.v_target > self.v_cruise_cluster and self.restore_allowed:
               self.state = State.increasing
 
             elif self.v_target < self.v_cruise_cluster and self.v_cruise_cluster > self.v_cruise_min:
@@ -146,7 +159,9 @@ class IntelligentCruiseButtonManagement:
     elif self.driver_adjust_frames > 0:
       self.driver_adjust_frames -= 1
 
-    self.is_ready = ready and not button_pressed and self.driver_adjust_frames == 0
+    moving = CS.vEgo >= STANDSTILL_SPEED and not CS.cruiseState.standstill
+
+    self.is_ready = ready and moving and not button_pressed and self.driver_adjust_frames == 0
 
   def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool, force_decel: bool = False) -> None:
     if self.CP_SP.pcmCruiseSpeed:
