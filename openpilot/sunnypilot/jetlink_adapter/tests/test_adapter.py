@@ -74,6 +74,21 @@ class TestJetlinkSetting(OpenpilotTestCase):
     assert off.shutdown_step(True, 'test') is True
     assert off.shutdown_step(False) is False
 
+  def test_the_host_picks_the_model_while_the_link_runs(self):
+    """Settings' Big Model list is not what runs with the link on: jetlink runs the computer's or phone's pick. A
+    chestnut stands jetlink down, so its list counts again; so it does with the link off or unreadable."""
+    for value, chestnut, picks in ((None, False, False), (0, False, False), ('junk', False, False),
+                                   (1, False, True), (2, False, True), (1, True, False), (2, True, False)):
+      _set_link(value)
+      assert jetlink_adapter.host_picks_model(chestnut) is picks, (value, chestnut)
+
+  def test_jetlink_is_handed_no_model_manager_pick(self):
+    """What the Settings note rests on: none of the keys through which jetlink takes the model manager's pick
+    (jetlink.openpilot.interface.Keys: big_model, catalog, select). Declaring one makes the comma's list a pick again,
+    and host_picks_model and the note must change with it."""
+    for key in ('big_model', 'catalog', 'select'):
+      assert key not in jetlink_adapter.KEYS._fields, key
+
 
 @unittest.skipUnless(HAVE_JETLINK, "no jetlink checkout")
 class TestJetlinkAdapter(OpenpilotTestCase):
@@ -98,6 +113,12 @@ class TestJetlinkAdapter(OpenpilotTestCase):
     assert op.engaged(sm(True, False)) is True
     assert op.engaged(sm(False, True)) is True
     assert 'carControlSP' in op.IN_CONTROL_SERVICES and 'carState' in op.IN_CONTROL_SERVICES
+
+  def test_jetlink_sees_no_model_manager_pick(self):
+    """Through jetlink's own interface: no big-model slot, catalog or select key, so it runs the host's pick or its
+    default (host_picks_model)."""
+    keys = jetlink_adapter.adapter().keys
+    assert keys.big_model is None and keys.catalog is None and keys.select is None
 
   def test_hooks_with_the_link_off(self):
     """With the setting off every hook a hot path calls answers as no jetlink at all, without binding."""

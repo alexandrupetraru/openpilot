@@ -78,6 +78,13 @@ def link_mode() -> str:
   return MODES[mode] if 0 <= mode < len(MODES) else MODES[0]
 
 
+def host_picks_model(chestnut_present: bool) -> bool:
+  """Is the big model the connected computer's or phone's pick rather than the model manager's? With the link on and
+  no chestnut fitted (a chestnut stands jetlink down): KEYS hands jetlink no model-manager pick, so it runs the model
+  picked in its app or on the host, else its own default, and the Big Model list in Settings is for a chestnut only."""
+  return link_on() and not chestnut_present
+
+
 @functools.cache
 def _adapter_class():
   from jetlink.openpilot.interface import Keys

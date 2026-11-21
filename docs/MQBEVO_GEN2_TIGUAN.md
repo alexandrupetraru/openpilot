@@ -24,8 +24,13 @@ on screen and the phone unlocked). Change it only when parked. Turning it on tur
 * Power the comma 3X from the car harness only, and the computer from its own supply: never let the host's port power
   the comma. A USB 3 cable (USB 2 is over the 50 ms frame budget on a Mac). Engine start and start-stop can brown a
   host out; the comma then simply falls back.
-* Pick the big model in the Jetlink app / on the host. On a curvature-steered VW the model's request goes almost
-  straight to the rack, so prefer one users rate as well-centred (Lebowski on a Mac/iPhone; a 766 MB model on a Jetson).
+* Pick the big model in the Jetlink app / on the host; with none picked, Jetlink runs its default (Cinque Terre V3).
+  The comma's own **Big Model** list (Settings → Models) is sunnypilot's pick for comma's big-model hardware (a
+  chestnut) and is never read by Jetlink on this branch: while Jetlink is on and no chestnut is fitted, that row shows
+  the model Jetlink will run and its SELECT is locked. Jetlink's docs saying to pick on either end describe zoompilot,
+  which hands its model manager's pick to Jetlink. On a curvature-steered VW the model's request goes almost
+  straight to the rack, so prefer one users rate as well-centred (Lebowski on a Mac/iPhone; a 766 MB model on a Jetson);
+  if the 10-minute benchmark says Tight, a 766 MB model leaves more of the 50 ms budget.
 
 **Driving.** The big model swaps in only while openpilot and lateral (MADS) are fully off: when **Big Model Ready /
 Re-engage to switch** shows, turn them off and on again; the second after a swap refuses engagement (a MADS enable in

@@ -45,6 +45,8 @@ class ModelsLayout(Widget):
     super().__init__()
     self._jetlink_status_text = ""
     self._jetlink_status_t = 0.
+    self._jetlink_model: str | None = None  # the big model Jetlink will run, by its name
+    self._big_model_note: str | None = None
     self.model_manager = None
     self.model_dialog = None
     self._selection_source = None
@@ -138,7 +140,8 @@ class ModelsLayout(Widget):
   def _jetlink_description(self) -> str:
     text = tr("Run the large driving model on a computer or phone connected to the comma's USB-C port: a Jetson, a Linux PC " +
               "with an NVIDIA GPU, a Mac or an Android phone (USB), or an iPhone or iPad (iPhone). Power the comma from the car, " +
-              "and the computer from its own supply. The big model takes over only while openpilot and lateral are off: " +
+              "and the computer from its own supply. Pick the big model in the Jetlink app or on the computer. " +
+              "The big model takes over only while openpilot and lateral are off: " +
               "turn them off and on again when \"Big Model Ready\" shows. If the link drops or lags while driving, the " +
               "built-in model takes over at once and \"Big Model Lost\" warns you. Turns off ADB. Change it only when parked.")
     return f"{text}\n\n{self._jetlink_status_text}" if self._jetlink_status_text else text
@@ -149,6 +152,7 @@ class ModelsLayout(Widget):
       return
     self._jetlink_status_t = now
     status = jetlink_adapter.status()
+    self._jetlink_model = status.model if status is not None else None
     if status is None or not status.shown:
       self._jetlink_status_text = ""
       return
@@ -381,8 +385,13 @@ class ModelsLayout(Widget):
     self.model_manager = ui_state.sm["modelManagerSP"]
     self._handle_bundle_download_progress()
 
+    # Jetlink on and no chestnut: the computer or phone picks the big model and this list's pick is never used
+    host_picks = jetlink_adapter.host_picks_model(ui_state.chestnut_present)
     carry_source, _, carry_display = carrying_model()
     for item, item_source in ((self.small_model_item, "qcom"), (self.big_model_item, "chestnut")):
+      if item_source == "chestnut" and host_picks:
+        item.action_item.set_value(self._jetlink_model or tr("Jetlink app"), style.ITEM_TEXT_VALUE_COLOR)
+        continue
       bundle = get_selected_bundle(ui_state.params, item_source)
       name = bundle.displayName if bundle else default_model_name(item_source)
       color = ON_COLOR if (item_source == carry_source and name == carry_display) else style.ITEM_TEXT_VALUE_COLOR
@@ -393,6 +402,13 @@ class ModelsLayout(Widget):
       self._last_note = note
       self._set_item_note(self.download_item, note)
 
+    big_model_note = tr("Jetlink is on: the big model is the one picked in the Jetlink app or on the computer, else " +
+                        "Jetlink's default. This list is for comma's own big-model hardware and does not change what " +
+                        "Jetlink runs.") if host_picks else ""
+    if big_model_note != self._big_model_note:
+      self._big_model_note = big_model_note
+      self._set_item_note(self.big_model_item, big_model_note)
+
     offroad = ui_state.is_offroad()
     # the link's mode changes the USB gadget: only while parked
     self.jetlink_mode.action_item.set_enabled(offroad)
@@ -400,7 +416,7 @@ class ModelsLayout(Widget):
     self.big_model_smoothing_toggle.set_visible(jetlink_adapter.link_on())
     self._update_jetlink_status()
     self.small_model_item.action_item.set_enabled(offroad)
-    self.big_model_item.action_item.set_enabled(offroad)
+    self.big_model_item.action_item.set_enabled(offroad and not host_picks)
     self.small_model_item.set_description("" if offroad else tr("Only available when vehicle is off, or always offroad mode is on"))
 
   def _render(self, rect):
@@ -409,3 +425,4 @@ class ModelsLayout(Widget):
   def show_event(self):
     self._scroller.show_event()
     self._last_note = None  # re-expand the failover note every time the page opens
+    self._big_model_note = None
