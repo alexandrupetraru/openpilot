@@ -40,6 +40,44 @@ for the big model only; leave it off unless the big model weaves on straight roa
 app while engaged; load the host until it lags. Each: the warning shows, steering carries on smoothly, nothing
 disengages, the set speed is not raised during the warning.
 
+## ICBM curve speed (branch `tiguan-mk3-jetlink`, 2026-11-21)
+
+Decided on the owner's drives (7 drives, ~2 h, Cluj city and local roads up to 72 km/h), replayed closed loop:
+
+* **SCC-Map camera gate** (stock ACC + ICBM only, `smart_cruise_control/camera_gate.py`). The map's slow points on
+  junctions or wrong road matches were the main "slows down too much": 6 of 11 map slowdowns were on roads driven
+  straight (down to the 20 km/h floor; three at the same spot near 46.7500, 23.516 in two drives). The camera's
+  near-field read now vetoes a map target once its point is within ~3 s (4 s on the Jetlink big model) and the camera
+  has seen a straight road there for 0.5 s; it lifts at once when the camera sees a bend. On the logs: all 9 straight-
+  road map events vetoed, all 5 real map curves kept. In a replay of a phantom 100 m ahead at 54 km/h the set speed
+  bottoms at 42 instead of 30 km/h; a real curve is followed exactly as before. Logged as
+  `longitudinalPlanSP.smartCruiseControl.map.cameraVeto` / `targetDistance`.
+* **Restore after a limiter: 1.5 s instead of 2 s, counted from the last drop.** Replayed, 1.5 s saves ~10 s of waiting
+  under a higher target over the 2 h with no more +/- flicker bursts (1.0 s doubled them). The wait no longer restarts
+  each time the set speed catches up with a target that keeps rising (a curve exit in small steps).
+* **Not changed: SCC-Vision's 4 s deceleration lead.** Shortening it would have taken one logged city bend (R ~44 m,
+  already 2.3 m/s^2) at ~2.7 m/s^2: the car reaches a lowered set speed late (the stock ACC lags), and the lead is what
+  makes up for that. To be revisited with highway / country drives and with the big model.
+* **Owner settings to try:** a livelier ACC driving profile in the car (the stock ACC accelerated at a median
+  0.14 m/s^2 while ICBM raised the set speed); check the car's own predictive / curve ACC is not also active, as it
+  stacks with SCC.
+
+**Where it will not do what you might expect**
+* A map phantom still *starts* a slowdown: its point is far when the map asks (~6-7 s at 50-60 km/h), beyond what the
+  camera can confirm; the gate ends it once the point is near. A persistent phantom spot shows as a short dip.
+* A trusted camera that misreads a real curve as straight inside its near field vetoes the map until it sees the bend
+  (replayed: 2 km/h less slowdown when the bend is seen 2 s out). Vision's own curve slowdown and lateral control run
+  on the same read.
+* For 5 s after modeld starts or after any Jetlink swap / hand-back the gate never vetoes (the model's history is
+  reset): phantoms then slow the car as before.
+* After a Jetlink hand-back ICBM does not raise the set speed for 5 s (lowering still works); a pick-up due then
+  waits for the warning to end.
+* ICBM never presses below 7 km/h or at a standstill, never while you press the accelerator or for 1.5 s after a stalk
+  press, and only with the stock ACC engaged: with MADS lateral and ACC off there is no curve slowdown at all.
+* Pick-up stays bounded by ICBM's press rate (one press per 0.2 s, ~5 km/h per s) and the car's own ACC acceleration.
+* Fast curves: vision sees a bend late at speed (the model reads far curvature low); map data is what slows early, and
+  the gate leaves far map points alone.
+
 ## Vehicle selection
 
 Settings → Vehicle → Volkswagen → **Volkswagen Tiguan 2025-26** (platform `VOLKSWAGEN_TIGUAN_MK3`).

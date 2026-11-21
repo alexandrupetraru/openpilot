@@ -26,7 +26,9 @@ class LongitudinalPlannerSP:
     self.events_sp = EventsSP()
     self.resolver = SpeedLimitResolver()
     self.dec = DynamicExperimentalController(CP, mpc)
-    self.scc = SmartCruiseControl()
+    # stock ACC driven by ICBM: the camera may veto a map target its near field sees as a straight road
+    icbm = not CP.openpilotLongitudinalControl and CP.pcmCruise and not CP_SP.pcmCruiseSpeed
+    self.scc = SmartCruiseControl(camera_gate=icbm)
     self.resolver = SpeedLimitResolver()
     self.sla = SpeedLimitAssist(CP, CP_SP)
     self.generation = int(model_bundle.generation) if (model_bundle := get_active_bundle()) else None
@@ -113,6 +115,8 @@ class LongitudinalPlannerSP:
     sccMap.aTarget = float(self.scc.map.output_a_target)
     sccMap.enabled = self.scc.map.is_enabled
     sccMap.active = self.scc.map.is_active
+    sccMap.cameraVeto = self.scc.map.camera_veto
+    sccMap.targetDistance = float(self.scc.map.target_distance)
 
     # Speed Limit
     speedLimit = longitudinalPlanSP.speedLimit

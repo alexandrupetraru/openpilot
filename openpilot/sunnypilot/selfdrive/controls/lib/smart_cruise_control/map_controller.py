@@ -83,12 +83,16 @@ class SmartCruiseControlMap:
     self.target_lat = 0.0
     self.target_lon = 0.0
     self.frame = -1
+    # stock ACC + ICBM only (camera_gate.py): the camera may veto a target whose point it sees as a straight road
+    self.camera_gate = None
+    self.camera_veto = False
+    self.target_distance = 0.0
 
     self.last_position = coordinate_from_param("LastGPSPosition", self.mem_params) or Coordinate(0.0, 0.0)
     self.target_velocities = velocities_from_param("MapTargetVelocities", self.mem_params) or []
 
   def get_v_target_from_control(self) -> float:
-    if self.is_active:
+    if self.is_active and not self.camera_veto:
       return max(self.v_target, MIN_V)
 
     return V_CRUISE_UNSET
@@ -243,7 +247,22 @@ class SmartCruiseControlMap:
 
     return enabled, active
 
-  def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise) -> None:
+  def target_point(self):
+    """The limiting point the target is for, or None."""
+    if self.v_target == 0 or (self.target_lat == 0 and self.target_lon == 0):
+      return None
+    return (self.target_lat, self.target_lon)
+
+  def update_target_distance(self) -> None:
+    point = self.target_point()
+    if point is None:
+      self.target_distance = 0.0
+      return
+    lat, lon = self.last_position.latitude, self.last_position.longitude
+    self.target_distance = distance_to_point(lat * TO_RADIANS, lon * TO_RADIANS, point[0] * TO_RADIANS, point[1] * TO_RADIANS)
+
+  def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise, camera=None) -> None:
+    """`camera`: (model_ok, big, yaw rate, speed and time arrays of the model's plan), for the camera gate."""
     self.long_enabled = long_enabled
     self.long_override = long_override
     self.v_ego = v_ego
@@ -252,8 +271,15 @@ class SmartCruiseControlMap:
 
     self.update_params()
     self.update_calculations()
+    self.update_target_distance()
 
     self.is_enabled, self.is_active = self._update_state_machine()
+    if self.camera_gate is not None and camera is not None:
+      model_ok, big, rate_z, vel_x, t = camera
+      point = self.target_point() if self.is_active else None
+      self.camera_veto = self.camera_gate.update(model_ok, big, rate_z, vel_x, t, v_ego, point, self.target_distance)
+    else:
+      self.camera_veto = False
 
     self.output_v_target = self.get_v_target_from_control()
     self.output_a_target = self.get_a_target_from_control()

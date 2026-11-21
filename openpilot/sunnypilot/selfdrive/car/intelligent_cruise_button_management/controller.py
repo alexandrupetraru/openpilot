@@ -27,8 +27,15 @@ DRIVER_ADJUST_FRAMES = CAR_SYNC_FRAMES
 # drive off. The car's own standstill flag is not reliable on every platform, so gate on speed as well.
 STANDSTILL_SPEED = 2.0  # m/s, ~7 km/h
 # Hold mode: wait before raising the set speed back up after a limiter clears, so a curve / limit that flickers
-# for a second does not turn into a burst of -/+ presses. Lowering is never delayed.
-RESTORE_DELAY_FRAMES = int(2.0 / DT_CTRL)
+# for a second does not turn into a burst of -/+ presses. Lowering is never delayed. 1.5 s: replayed closed loop on
+# 113 min of the owner's drives it cut the pick-up waiting by 10 s with no more flicker bursts than 2.0 s (1.0 s
+# doubled them)
+RESTORE_DELAY_FRAMES = int(1.5 / DT_CTRL)
+# The wait counts from the last lowering demand (the target under the car's set speed) or the last real drop of the
+# target: at least this far (display units) under its peak since. Not from the moment the set speed catches up with a
+# target that is still rising: leaving a curve the target rises in small steps, and a wait at every step held the car
+# under a target it had already been allowed to follow (logged: a quarter of every pick-up spent waiting).
+RESTORE_DROP_TOLERANCE = 2
 
 ALLOWED_SPEED_THRESHOLD = 1.8  # m/s, ~4 MPH
 HYST_GAP = 0.0  # currently disabled; TODO-SP: might need to be brand-specific
@@ -52,6 +59,7 @@ class IntelligentCruiseButtonManagement:
     self.hold_set_speed = True
     self.driver_adjust_frames = 0
     self.raise_frames = 0
+    self.v_target_peak = 0  # the highest target since the last drop, for RESTORE_DROP_TOLERANCE
     # set by selfdrived for the seconds after the Jetlink big model is lost while in control: lower, never raise
     self.raise_hold = False
     self.read_params()
@@ -103,8 +111,18 @@ class IntelligentCruiseButtonManagement:
 
     self.v_target = round(self.v_target_ms_last * speed_conv)
     self.v_cruise_min = get_minimum_set_speed(self.is_metric, self.CP)
-    self.raise_frames = self.raise_frames + 1 if self.v_target > self.v_cruise_cluster else 0
+    self.update_restore_timer()
     self.v_cruise_cluster = round(CS.cruiseState.speedCluster * speed_conv)
+
+  def update_restore_timer(self) -> None:
+    """raise_frames: how long a raise has been wanted since the last lowering demand or drop of the target. Caught up
+    with the target, it holds its count, so the next step of a rising target is followed without a new wait."""
+    dropped = self.v_target <= self.v_target_peak - RESTORE_DROP_TOLERANCE
+    self.v_target_peak = self.v_target if dropped else max(self.v_target_peak, self.v_target)
+    if dropped or self.v_target < self.v_cruise_cluster:
+      self.raise_frames = 0
+    elif self.v_target > self.v_cruise_cluster:
+      self.raise_frames += 1
 
   def update_state_machine(self) -> custom.IntelligentCruiseButtonManagement.SendButtonState:
     self.pre_active_timer = max(0, self.pre_active_timer - 1)

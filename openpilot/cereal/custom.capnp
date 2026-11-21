@@ -236,6 +236,8 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       aTarget @2 :Float32;
       enabled @3 :Bool;
       active @4 :Bool;
+      cameraVeto @5 :Bool;         # stock ACC + ICBM: the camera's near field saw a straight road at the map's point
+      targetDistance @6 :Float32;  # m to the map's limiting point, 0 without one
     }
 
     enum VisionState {

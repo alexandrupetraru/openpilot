@@ -235,6 +235,36 @@ class TestJetlinkScenarios(OpenpilotTestCase):
       assert len(events) == 0 and len(events_sp) == 0
     assert not je.settling and not je.link_lost and not je.no_entry
 
+  def test_icbm_holds_its_raise_over_the_warning(self):
+    """End to end: the warning's flag is what selfdrived hands ICBM; the target rising under it is not followed until
+    the warning is over, lowering is."""
+    from opendbc.car.structs import car as car_structs
+    from opendbc.car.volkswagen.values import VolkswagenFlags
+    from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
+    from openpilot.sunnypilot.selfdrive.car.tests.test_icbm_hold_set_speed import _Params, _cc, _cs, _lp_sp
+    from openpilot.sunnypilot.selfdrive.car.tests.test_icbm_restore import Car, PRESS_FRAMES
+    CP = car_structs.CarParams(brand="volkswagen", pcmCruise=True, flags=int(VolkswagenFlags.MQB_EVO_GEN2))
+    icbm = IntelligentCruiseButtonManagement(CP, custom.CarParamsSP(pcmCruiseSpeed=False), params=_Params(True))
+    car_ = Car(40)
+
+    def step(lp, in_control=True):
+      events, events_sp = Events(), EventsSP()
+      self.je.update(self.sm, in_control, events, events_sp)
+      icbm.run(_cs(60, (), None, car_.cluster), _cc(), lp, is_metric=True, hold_raise=self.je.link_lost)
+      car_.step(icbm)
+
+    self.swap_in()
+    for _ in range(200):
+      step(_lp_sp(vision_kph=40))
+    self.sm.big = False  # handed back mid-curve
+    self.je.swap.state = 'retrying'
+    for _ in range(int(HANDBACK_S / DT_CTRL) - 5):
+      step(_lp_sp(vision_kph=55))  # the built-in model reads the bend as gentler
+    assert car_.ups == 0 and car_.cluster == 40
+    for _ in range(PRESS_FRAMES * 4):
+      step(_lp_sp(vision_kph=55))
+    assert car_.ups >= 2  # the warning is over and the wait already served
+
 
 class TestMadsJetlinkPause(OpenpilotTestCase):
   def _state_machine(self, no_entry):
