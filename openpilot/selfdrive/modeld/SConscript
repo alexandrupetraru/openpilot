@@ -124,6 +124,15 @@ for cam_w, cam_h in camera_configs:
          f'--output {dm_pkl_path}')
   lenv.Command(dm_pkl_path, tinygrad_files + compile_dm_warp_script + compile_modeld_script + [tg_devices_node], cmd)
 
+# the driving warp Jetlink runs on the comma: both camera frames in one JIT (compile_driving_warp.py)
+compile_driving_warp_script = [File(f"{modeld_dir}/compile_driving_warp.py")]
+for cam_w, cam_h in camera_configs:
+  warp_pkl_path = File(f"models/driving_warp_{cam_w}x{cam_h}_tinygrad.pkl").abspath
+  cmd = (f'{tg_flags} {mac_brew_string} python3 {modeld_dir}/compile_driving_warp.py '
+         f'--camera-resolution {cam_w}x{cam_h} --warp-to {model_w}x{model_h} '
+         f'--output {warp_pkl_path}')
+  lenv.Command(warp_pkl_path, tinygrad_files + compile_driving_warp_script + compile_modeld_script + [tg_devices_node], cmd)
+
 def tg_compile(flags, model_name):
   pythonpath_string = 'PYTHONPATH="${PYTHONPATH}:' + env.Dir("#tinygrad_repo").abspath + '"'
   fn = File(f"models/{model_name}").abspath

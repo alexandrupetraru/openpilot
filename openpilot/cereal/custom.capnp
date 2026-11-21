@@ -354,6 +354,8 @@ struct OnroadEventSP @0xda96579883444c35 {
     e2eChime @23;
     laneChangeRoadEdge @24;
     bigModelReady @25;
+    bigModelAvailable @26;  # Jetlink: the big model is ready, re-engage to switch
+    bigModelLinkLost @27;   # Jetlink: big model lost while in control, the built-in model drives on
   }
 }
 

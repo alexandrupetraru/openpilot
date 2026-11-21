@@ -52,6 +52,8 @@ class IntelligentCruiseButtonManagement:
     self.hold_set_speed = True
     self.driver_adjust_frames = 0
     self.raise_frames = 0
+    # set by selfdrived for the seconds after the Jetlink big model is lost while in control: lower, never raise
+    self.raise_hold = False
     self.read_params()
 
     self.v_target = 0
@@ -84,6 +86,8 @@ class IntelligentCruiseButtonManagement:
 
   @property
   def restore_allowed(self) -> bool:
+    if self.raise_hold:
+      return False
     return not self.hold_set_speed or self.raise_frames >= RESTORE_DELAY_FRAMES
 
   @property
@@ -130,7 +134,7 @@ class IntelligentCruiseButtonManagement:
 
         # ACCELERATING
         elif self.state == State.increasing:
-          if self.v_target <= self.v_cruise_cluster:
+          if self.v_target <= self.v_cruise_cluster or self.raise_hold:
             self.state = State.holding
 
         # DECELERATING
@@ -163,11 +167,13 @@ class IntelligentCruiseButtonManagement:
 
     self.is_ready = ready and moving and not button_pressed and self.driver_adjust_frames == 0
 
-  def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool, force_decel: bool = False) -> None:
+  def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool, force_decel: bool = False,
+          hold_raise: bool = False) -> None:
     if self.CP_SP.pcmCruiseSpeed:
       return
 
     self.is_metric = is_metric
+    self.raise_hold = hold_raise
 
     self.update_calculations(CS, LP_SP, force_decel)
     self.update_readiness(CS, CC)

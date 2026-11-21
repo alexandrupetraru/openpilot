@@ -35,6 +35,7 @@ from openpilot.common.hardware.usb import CHESTNUT_USB_IDS
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
 from openpilot.selfdrive.modeld.helpers import chestnut_present, chestnut_compiled, chestnut_ready, modeld_pkl_path, load_oob
 
+from openpilot.sunnypilot import jetlink_adapter
 from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.selfdrive.controls.lib.relc import RoadEdgeLaneChangeController
@@ -45,6 +46,11 @@ LAT_SMOOTH_SECONDS = 0.0
 LONG_SMOOTH_SECONDS = 0.3
 MIN_LAT_CONTROL_SPEED = 0.3
 BIG_MODEL_TIMEOUT = 60
+# BigModelSmoothing: extra curvature smoothing while a big model drives (a chestnut, or Jetlink's large model), whose
+# outputs carry a ~1 Hz wiggle on straights that the small model's do not (zoompilot model_settings.py). Not added to
+# lat_delay: telling the model the car is slower than lagd measured feeds the model<->car loop. Off by default here,
+# where EnableSmoothSteer already smooths the curvature request
+BIG_MODEL_LAT_SMOOTH_SECONDS = 0.1
 
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
@@ -204,8 +210,8 @@ class ModelState(ModelStateBase):
 
   def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
           inputs: dict[str, np.ndarray], after_enqueue: Callable[[], None] | None = None) -> dict[str, np.ndarray]:
-    for key, buf in bufs.items():
-      np.copyto(self.frame_views[key], np.frombuffer(buf.data, dtype=np.uint8, count=self.frame_copy_size))
+    for key in self.vision_input_names:
+      np.copyto(self.frame_views[key], np.frombuffer(bufs[key].data, dtype=np.uint8, count=self.frame_copy_size))
 
     # Model decides when action is completed, so desire input is just a pulse triggered on rising edge
     inputs['desire_pulse'][0] = 0
@@ -262,7 +268,11 @@ def main(demo=False):
   else:
     params.remove("ChestnutActive")
 
-  config_realtime_process(7, 54)
+  # Jetlink: the GPU init it does here spawns a thread that would inherit SCHED_FIFO 54 on core 7, so it runs before
+  # modeld goes realtime. Link off (or a chestnut): modeld goes realtime here, as always
+  JETLINK = jetlink_adapter.prepare(CHESTNUT)
+  if not JETLINK:
+    config_realtime_process(7, 54)
 
   # visionipc clients
   while True:
@@ -313,14 +323,23 @@ def main(demo=False):
   small_model = ModelState(vipc_client_main.width, vipc_client_main.height, False) if model is None or CHESTNUT else None
   if model is None:
     model = small_model
+  # the model that drives: `model`, or with the link on Jetlink's joining model, which drives as small_model until the
+  # large model is there and swaps only while nothing is in control
+  unjoined = model
+  model = jetlink_adapter.attach(model, small_model, vipc_client_main.width, vipc_client_main.height)
+  joined_model = model if model is not unjoined else None
   params.put_bool("ChestnutLoading", False)
   assert model is not None
+  if JETLINK:
+    config_realtime_process(7, 54)
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
 
   # messaging
   pub_socks = ["modelV2", "drivingModelData", "cameraOdometry", "modelDataV2SP"] + (["chestnutState"] if CHESTNUT else [])
   pm = PubMaster(pub_socks)
-  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState", "carControl", "lateralDelay"])
+  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState", "carControl",
+                  "controlsState", "lateralDelay"])
+  big_model_smoothing = params.get_bool("BigModelSmoothing")
 
   publish_state = PublishState()
   params = Params()
@@ -392,6 +411,8 @@ def main(demo=False):
     frame_id = sm["narrowRoadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
     model.lat_delay = get_lat_delay(params, sm["lateralDelay"].lateralDelay)
+    if sm.frame % 60 == 0:
+      big_model_smoothing = params.get_bool("BigModelSmoothing")
     lat_delay = sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
     if sm.updated["extrinsicsCalibration"] and sm.seen['narrowRoadCameraState'] and sm.seen['deviceState']:
       device_from_calib_euler = np.array(sm["extrinsicsCalibration"].rpyCalib, dtype=np.float32)
@@ -420,8 +441,11 @@ def main(demo=False):
 
     frame_drop_ratio = frames_dropped / (1 + frames_dropped)
 
-    bufs = {name: buf_extra if 'big' in name else buf_main for name in model.vision_input_names}
-    transforms = {name: model_transform_extra if 'big' in name else model_transform_main for name in model.vision_input_names}
+    # the frames under the driving model's names and the small model's both: a hand-back runs the small model on
+    # the very frame the large one failed on
+    vision_names = set(model.vision_input_names) | set(small_model.vision_input_names if small_model is not None else ())
+    bufs = {name: buf_extra if 'big' in name else buf_main for name in vision_names}
+    transforms = {name: model_transform_extra if 'big' in name else model_transform_main for name in vision_names}
     frame_delay = DT_MDL # compensate for time passed since the frame was captured: current_time - timestamp_eof is 50ms on average
     action_delay = DT_MDL / 2 # middle of the interval between model output (current state) and next frame (expected state)
     lat_action_t = lat_delay + frame_delay + action_delay
@@ -432,33 +456,50 @@ def main(demo=False):
       'action_t': np.array([lat_action_t, long_action_t], dtype=np.float32),
     }
 
+    # Jetlink hands a lagging large model back on this: modeld's share of dropped camera frames
+    model.frame_drop_ratio = frame_drop_ratio
     mt1 = time.perf_counter()
     try:
       send_chestnut = (chestnut_state is not None and
                        run_count % round(ModelConstants.MODEL_RUN_FREQ / SERVICE_LIST['chestnutState'].frequency) == 0)
       model_output = model.run(bufs, transforms, inputs, chestnut_state.send if send_chestnut else None)
     except Exception:
-      if not params.get_bool("ChestnutActive"):
+      if joined_model is not None and model is joined_model:
+        # an error that escaped Jetlink's own fallback: the small model drives this frame and the rest of the drive
+        assert small_model is not None
+        model_output = jetlink_adapter.small_takes_over(joined_model, small_model, bufs, transforms, inputs)
+        model, joined_model, run_count = small_model, None, 0
+      elif not params.get_bool("ChestnutActive"):
         raise
-      # fallback to small model
-      cloudlog.exception("big model failed, fall back to small")
-      params.put_bool("ChestnutModelError", True)
-      params.put_bool("ChestnutActive", False)
-      assert small_model is not None
-      model = small_model
-      if chestnut_state is not None:
-        chestnut_state.big = False
-      run_count = 0
-      model_output = None
+      else:
+        # fallback to small model
+        cloudlog.exception("big model failed, fall back to small")
+        params.put_bool("ChestnutModelError", True)
+        params.put_bool("ChestnutActive", False)
+        assert small_model is not None
+        model = small_model
+        if chestnut_state is not None:
+          chestnut_state.big = False
+        run_count = 0
+        model_output = None
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
+    # a swap or a hand-back stalls a frame or two: restart the dropped-frame filter's warmup, as for a chestnut's fallback
+    if jetlink_adapter.handed_over(model):
+      run_count, frame_drop_ratio = 0, 0.
 
     if model_output is not None:
       modelv2_send = messaging.new_message('modelV2')
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
 
+      big_smooth = big_model_smoothing and model.chestnut and LAT_SMOOTH_SECONDS == 0.
+      if big_smooth and not sm['carControl'].latActive:
+        # the smoothing starts from the curvature the car drives, not a stale request
+        prev_action.desiredCurvature = sm['controlsState'].curvature
       action = get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego)
+      if big_smooth and v_ego > MIN_LAT_CONTROL_SPEED:
+        action.desiredCurvature = float(smooth_value(action.desiredCurvature, prev_action.desiredCurvature, BIG_MODEL_LAT_SMOOTH_SECONDS))
       prev_action = action
       fill_model_msg(modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,

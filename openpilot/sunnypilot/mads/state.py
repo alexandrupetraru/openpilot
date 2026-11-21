@@ -40,7 +40,14 @@ class StateMachine:
     return bool(self._events.contains(event_type) or self._events_sp.contains(event_type))
 
   def check_contains_in_list(self) -> bool:
-    return bool(self._events.contains_in_list(GEARS_ALLOW_PAUSED) or self._events_sp.contains_in_list(GEARS_ALLOW_PAUSED_SILENT))
+    gears = GEARS_ALLOW_PAUSED
+    jetlink = getattr(self.selfdrive, 'jetlink_events', None)
+    if jetlink is not None and jetlink.no_entry:
+      # Jetlink's second after a big-model swap: a MADS enable then (a main-on edge, never repeated) waits in paused
+      # and resumes on its own once the big model is ready, rather than being refused and left off with main on.
+      # Only Jetlink's no-entry: a chestnut's own load keeps refusing
+      gears = [*GEARS_ALLOW_PAUSED, EventName.bigModelLoading]
+    return bool(self._events.contains_in_list(gears) or self._events_sp.contains_in_list(GEARS_ALLOW_PAUSED_SILENT))
 
   def update(self):
     # soft disable timer and current alert types are from the state machine of openpilot

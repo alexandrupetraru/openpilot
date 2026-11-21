@@ -9,6 +9,37 @@ error) and made Intelligent Cruise Button Management walk the set speed down on 
 Repository: `https://github.com/alexandrupetraru/openpilot`, branch `tiguan-mk3`.
 The `opendbc_repo` submodule points at `https://github.com/alexandrupetraru/opendbc` (same branch name).
 
+Branch `tiguan-mk3-jetlink` is `tiguan-mk3` plus Jetlink (below); its opendbc is the same `tiguan-mk3` commit.
+`tiguan-mk3` stays as the fallback. Custom Software URL: `alexandrupetraru/tiguan-mk3-jetlink`.
+
+## Jetlink: the large driving model on a connected computer or phone (branch `tiguan-mk3-jetlink`)
+
+[Jetlink](https://github.com/zoompilot/jetlink) (v0.9.0, `jetlink_repo`) runs openpilot's large driving model on a
+computer or phone on the comma's USB-C port. Off by default; with it off the branch behaves as `tiguan-mk3` (same
+selfdrived output on replayed drives, same model output).
+
+**Setup.** Settings → Models → **Jetlink**: *USB* for a Jetson Orin Nano Super, a Linux PC with an NVIDIA GPU, an
+Apple-silicon Mac or an Android phone (experimental); *iPhone* for an iPhone/iPad with USB-C (TestFlight app, keep it
+on screen and the phone unlocked). Change it only when parked. Turning it on turns ADB off (the link uses the port).
+* Power the comma 3X from the car harness only, and the computer from its own supply: never let the host's port power
+  the comma. A USB 3 cable (USB 2 is over the 50 ms frame budget on a Mac). Engine start and start-stop can brown a
+  host out; the comma then simply falls back.
+* Pick the big model in the Jetlink app / on the host. On a curvature-steered VW the model's request goes almost
+  straight to the rack, so prefer one users rate as well-centred (Lebowski on a Mac/iPhone; a 766 MB model on a Jetson).
+
+**Driving.** The big model swaps in only while openpilot and lateral (MADS) are fully off: when **Big Model Ready /
+Re-engage to switch** shows, turn them off and on again; the second after a swap refuses engagement (a MADS enable in
+it waits and resumes on its own), then a chime. If the link drops or lags while engaged (5 late frames in a row, more
+than 20 in 10 s, a 0.2 s silence or modeld dropping frames), the built-in model takes over **on the same frame** and
+**TAKE CONTROL: Big Model Lost / Using built-in model** warns for 5 s: nothing disengages, steering continues (its change
+is rate-limited as always), and ICBM does not raise the set speed during the warning. The big model comes back only
+after you disengage. **Smooth Big Model** (Settings → Models, shown with the link on) adds 0.1 s of curvature smoothing
+for the big model only; leave it off unless the big model weaves on straight roads (Smooth Steer already smooths).
+
+**Checkpoint drills** (empty straight road, hands on the wheel): unplug the cable while engaged; quit or lock the host
+app while engaged; load the host until it lags. Each: the warning shows, steering carries on smoothly, nothing
+disengages, the set speed is not raised during the warning.
+
 ## Vehicle selection
 
 Settings → Vehicle → Volkswagen → **Volkswagen Tiguan 2025-26** (platform `VOLKSWAGEN_TIGUAN_MK3`).

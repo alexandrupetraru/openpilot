@@ -33,6 +33,7 @@ from openpilot.sunnypilot.selfdrive.car.cruise_helpers import CruiseHelper
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
 from openpilot.sunnypilot.selfdrive.selfdrived.button_state_tracker import ButtonStateTracker
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+from openpilot.sunnypilot.selfdrive.selfdrived.jetlink_events import JetlinkEvents
 
 REPLAY = "REPLAY" in os.environ
 SIMULATION = "SIMULATION" in os.environ
@@ -164,7 +165,7 @@ class SelfdriveD(CruiseHelper):
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
-    self.ignored_processes = {'mapd', }
+    self.ignored_processes = {'mapd', *JetlinkEvents.OPTIONAL_PROCESSES}
 
     # Determine startup event
     is_remote = build_metadata.openpilot.comma_remote or build_metadata.openpilot.sunnypilot_remote
@@ -190,6 +191,7 @@ class SelfdriveD(CruiseHelper):
 
     self.events_sp = EventsSP()
     self.events_sp_prev = []
+    self.jetlink_events = JetlinkEvents()
 
     self.mads = ModularAssistiveDrivingSystem(self)
     self.icbm = IntelligentCruiseButtonManagement(self.CP, self.CP_SP)
@@ -230,6 +232,10 @@ class SelfdriveD(CruiseHelper):
       self.big_model_active = True
     if not self.enabled and not model_unavailable:
       self.big_model_active = False
+
+    # Jetlink's big model, which joins mid-drive: its offer, the no-entry second after a swap, and the link-lost
+    # warning. In control is the swap gate's rule: openpilot, or MADS even with its lateral paused
+    self.jetlink_events.update(self.sm, self.enabled or self.mads.enabled, self.events, self.events_sp)
 
     if self.sm.recv_frame['lateralManeuverPlan'] > 0:
       self.events.add(EventName.lateralManeuver)
@@ -451,7 +457,9 @@ class SelfdriveD(CruiseHelper):
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
     warmup_sec = 5.
     big_model_settling = self.big_model_loading or time.monotonic() < self.big_model_ready_t + warmup_sec
-    if not self.sm.all_checks() and no_system_errors and not big_model_settling:  # the load holds modelV2 and friends back on purpose
+    # Jetlink: for the second after a model switch, only what the switch's dropped frame delays is held
+    jetlink_comm_ok = self.jetlink_events.comm_ok(self.sm)
+    if not self.sm.all_checks() and no_system_errors and not big_model_settling and not jetlink_comm_ok:  # the load holds modelV2 and friends back on purpose
       if not self.sm.all_alive():
         self.events.add(EventName.commIssue)
       elif not self.sm.all_freq_ok():
@@ -470,7 +478,8 @@ class SelfdriveD(CruiseHelper):
     else:
       self.logged_comm_issue = None
 
-    if not self.CP.notCar and not big_model_settling:  # localization has nothing to work with during the load
+    # localization has nothing to work with during the load, nor for the frame a Jetlink switch drops
+    if not self.CP.notCar and not big_model_settling and not self.jetlink_events.settling:
       if not self.sm['deviceMotion'].posenetOK:
         self.events.add(EventName.posenetInvalid)
       if not self.sm['deviceMotion'].inputsOK:
@@ -523,7 +532,7 @@ class SelfdriveD(CruiseHelper):
 
     # TODO: fix simulator
     if not SIMULATION or REPLAY:
-      if self.sm['modelV2'].frameDropPerc > 1:
+      if self.sm['modelV2'].frameDropPerc > 1 and not self.jetlink_events.settling:
         self.events.add(EventName.modeldLagging)
 
     # mute canBusMissing event if in Park, as it sometimes may trigger a false alarm with MADS in Paused state
@@ -541,7 +550,10 @@ class SelfdriveD(CruiseHelper):
           self.events.add(EventName.personalityChanged)
         self.experimental_mode_switched = False
 
-    self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric, force_decel=self.sm['controlsState'].forceDecel)
+    # for the seconds after the Jetlink big model is lost while in control, the built-in model is re-learning the
+    # road from a reset history: ICBM may lower the set speed then but never raise it
+    self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric, force_decel=self.sm['controlsState'].forceDecel,
+                  hold_raise=self.jetlink_events.link_lost)
 
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)

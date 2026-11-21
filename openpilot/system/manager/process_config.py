@@ -6,10 +6,11 @@ from opendbc.car.structs import car
 from openpilot.cereal import custom
 from openpilot.common.params import Params
 from openpilot.common.hardware import PC, COMMA_HARDWARE
-from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
+from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess, RestartingPythonProcess
 from openpilot.common.hardware.hw import Paths
 
 from openpilot.sunnypilot.mapd.mapd_manager import MAPD_PATH
+from openpilot.sunnypilot import jetlink_adapter
 
 from openpilot.sunnypilot.models.helpers import get_active_model_runner
 from openpilot.sunnypilot.sunnylink.utils import sunnylink_need_register, sunnylink_ready, use_sunnylink_uploader
@@ -173,6 +174,8 @@ procs = [
 procs += [
   # Models
   PythonProcess("models_manager", "openpilot.sunnypilot.models.manager", only_offroad),
+  # Jetlink: the gadget owner, onroad and offroad while the setting is on. Optional: selfdrived never blocks engaging on it
+  RestartingPythonProcess(jetlink_adapter.OWNER, "openpilot.sunnypilot.jetlink_adapter", jetlink_adapter.should_run),
   NativeProcess("modeld_tinygrad", "openpilot/sunnypilot/modeld_v2", ["./modeld"], and_(only_onroad, is_tinygrad_model)),
 
   # Backup

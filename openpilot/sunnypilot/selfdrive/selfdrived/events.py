@@ -260,4 +260,24 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
       AlertStatus.normal, AlertSize.small,
       Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 2.),
   },
+
+  # Jetlink (openpilot/sunnypilot/jetlink_adapter): the big model on the link is ready while something is in
+  # control. It never swaps in while steering, so the driver is told once and re-engages to use it.
+  EventNameSP.bigModelAvailable: {
+    ET.PERMANENT: Alert(
+      "Big Model Ready",
+      "Re-engage to switch",
+      AlertStatus.normal, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, .2),
+  },
+
+  # Jetlink: the link dropped or lagged while in control. The built-in model took over on the same frame and
+  # openpilot stays engaged: a warning, never a disengagement. Held 5 s by jetlink's swap events.
+  EventNameSP.bigModelLinkLost: {
+    ET.WARNING: Alert(
+      "TAKE CONTROL: Big Model Lost",
+      "Using built-in model",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.MID, VisualAlert.steerRequired, AudibleAlert.warningSoft, .2),
+  },
 }

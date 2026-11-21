@@ -107,6 +107,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"Offroad_UnregisteredHardware", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_UpdateFailed", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_DriverMonitoringUncertain", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
+    {"Offroad_JetlinkUnavailable", {CLEAR_ON_MANAGER_START, JSON}},
     {"OnroadCycleRequested", {CLEAR_ON_MANAGER_START, BOOL}},
     {"OpenpilotEnabledToggle", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"PandaHeartbeatLost", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
@@ -139,6 +140,14 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ChestnutActive", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION | CLEAR_ON_IGNITION_ON, BOOL}},
     {"ChestnutLoading", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION | CLEAR_ON_IGNITION_ON, BOOL}},
     {"ChestnutModelError", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION | CLEAR_ON_IGNITION_ON, BOOL}},
+    // Jetlink: the large driving model on a USB-connected computer or phone (jetlink_repo, openpilot/sunnypilot/jetlink_adapter).
+    // JetlinkLink is the setting (0 off, 1 USB, 2 iPhone/iPad). Not BACKUP: a restored backup must never switch the link on on another device.
+    {"JetlinkLink", {PERSISTENT, INT, "0"}},
+    {"JetlinkProgress", {CLEAR_ON_MANAGER_START, JSON}},
+    {"JetlinkSpec", {PERSISTENT, JSON}},
+    {"JetlinkChargePhone", {PERSISTENT, BOOL, "0"}},
+    // extra 0.1 s curvature smoothing while the big model drives; off by default here, EnableSmoothSteer already smooths
+    {"BigModelSmoothing", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"Version", {PERSISTENT, STRING}},
 	
 	// --- infiniteCable params --- //

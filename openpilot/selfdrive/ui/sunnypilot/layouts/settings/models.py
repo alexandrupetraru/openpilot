@@ -10,6 +10,7 @@ import time
 import pyray as rl
 
 from openpilot.cereal import custom
+from openpilot.sunnypilot import jetlink_adapter
 from openpilot.sunnypilot.models.helpers import ACTIVE_BUNDLE_KEYS, get_selected_bundle, resolve_bundle_by_ref
 from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.ui_state import device, ui_state
@@ -24,7 +25,7 @@ from openpilot.system.ui.widgets.toggle import ON_COLOR
 from openpilot.sunnypilot.models.runners.constants import CUSTOM_MODEL_PATH
 from openpilot.system.ui.sunnypilot.lib.styles import style
 from openpilot.system.ui.sunnypilot.lib.utils import NoElideButtonAction, ScrollingButtonAction
-from openpilot.system.ui.sunnypilot.widgets.list_view import ListItemSP, toggle_item_sp, option_item_sp
+from openpilot.system.ui.sunnypilot.widgets.list_view import ListItemSP, toggle_item_sp, option_item_sp, multiple_button_item_sp
 from openpilot.system.ui.sunnypilot.widgets.download_status import download_status_item
 from openpilot.system.ui.sunnypilot.widgets.tree_dialog import TreeOptionDialog, TreeNode, TreeFolder
 
@@ -32,9 +33,18 @@ if gui_app.sunnypilot_ui():
   from openpilot.system.ui.sunnypilot.widgets.list_view import button_item_sp as button_item
 
 
+# what the Jetlink chip says per jetlink.openpilot.status.PHASES; an unknown phase (the list only grows) shows as is
+JETLINK_PHASES = {'unavailable': "Unavailable", 'off': "Off", 'active': "Big model driving", 'waiting': "Waiting for the computer",
+                  'reconnecting': "Reconnecting", 'failed': "Failed", 'preparing': "Preparing the model",
+                  'connecting': "Connecting", 'prepared': "Ready: re-engage to switch"}
+JETLINK_STATUS_PERIOD = 0.5  # s; status() reads files and params
+
+
 class ModelsLayout(Widget):
   def __init__(self):
     super().__init__()
+    self._jetlink_status_text = ""
+    self._jetlink_status_t = 0.
     self.model_manager = None
     self.model_dialog = None
     self._selection_source = None
@@ -106,8 +116,51 @@ class ModelsLayout(Widget):
                                         1, None, True, "", style.BUTTON_ACTION_WIDTH, None, True,
                                         lambda v: f"{v / 100:.2f} m")
 
+    # Jetlink: the large driving model on a computer or phone connected by USB (openpilot/sunnypilot/jetlink_adapter)
+    self.jetlink_mode = multiple_button_item_sp(
+      title=lambda: tr("Jetlink"),
+      description=lambda: self._jetlink_description(),
+      buttons=[lambda: tr("Off"), lambda: tr("USB"), lambda: tr("iPhone")],
+      param="JetlinkLink",
+      button_width=250,
+      callback=None,
+    )
+    self.big_model_smoothing_toggle = toggle_item_sp(
+      tr("Smooth Big Model"),
+      tr("Smooth the big model's steering requests a little more (0.1 s). Big models can carry a slight weave on straight roads " +
+         "that the built-in model does not. Leave off while \"Smooth Steer\" is on, unless the weave shows."),
+      param="BigModelSmoothing")
+
     self.items = [self.small_model_item, self.big_model_item, self.cancel_download_item, self.download_item, self.refresh_item, self.clear_cache_item,
+                  self.jetlink_mode, self.big_model_smoothing_toggle,
                   self.lane_turn_desire_toggle, self.lane_turn_value_control, self.lagd_toggle, self.delay_control, self.camera_offset]
+
+  def _jetlink_description(self) -> str:
+    text = tr("Run the large driving model on a computer or phone connected to the comma's USB-C port: a Jetson, a Linux PC " +
+              "with an NVIDIA GPU, a Mac or an Android phone (USB), or an iPhone or iPad (iPhone). Power the comma from the car, " +
+              "and the computer from its own supply. The big model takes over only while openpilot and lateral are off: " +
+              "turn them off and on again when \"Big Model Ready\" shows. If the link drops or lags while driving, the " +
+              "built-in model takes over at once and \"Big Model Lost\" warns you. Turns off ADB. Change it only when parked.")
+    return f"{text}\n\n{self._jetlink_status_text}" if self._jetlink_status_text else text
+
+  def _update_jetlink_status(self) -> None:
+    now = time.monotonic()
+    if now - self._jetlink_status_t < JETLINK_STATUS_PERIOD:
+      return
+    self._jetlink_status_t = now
+    status = jetlink_adapter.status()
+    if status is None or not status.shown:
+      self._jetlink_status_text = ""
+      return
+    phase = JETLINK_PHASES.get(status.phase, status.phase)
+    parts = [tr("Status: {}").format(tr(phase))]
+    if status.active_model:
+      parts.append(tr("Model: {}").format(status.active_model))
+    if (status.progress or {}).get('msg'):
+      parts.append(status.progress['msg'])
+    if status.reason:
+      parts.append(status.reason)
+    self._jetlink_status_text = " · ".join(parts)
 
   def _update_lagd_description(self, lagd_toggle: bool):
     desc = tr("Enable this for the car to learn and adapt its steering response time. Disable to use a fixed steering response time. " +
@@ -341,6 +394,11 @@ class ModelsLayout(Widget):
       self._set_item_note(self.download_item, note)
 
     offroad = ui_state.is_offroad()
+    # the link's mode changes the USB gadget: only while parked
+    self.jetlink_mode.action_item.set_enabled(offroad)
+    self.big_model_smoothing_toggle.action_item.set_state(ui_state.params.get_bool("BigModelSmoothing"))
+    self.big_model_smoothing_toggle.set_visible(jetlink_adapter.link_on())
+    self._update_jetlink_status()
     self.small_model_item.action_item.set_enabled(offroad)
     self.big_model_item.action_item.set_enabled(offroad)
     self.small_model_item.set_description("" if offroad else tr("Only available when vehicle is off, or always offroad mode is on"))

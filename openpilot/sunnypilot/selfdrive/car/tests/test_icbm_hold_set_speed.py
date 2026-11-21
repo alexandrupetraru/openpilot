@@ -67,9 +67,9 @@ class TestIcbmHoldSetSpeed(OpenpilotTestCase):
   def _icbm(self, hold=True):
     return IntelligentCruiseButtonManagement(self.CP, self.CP_SP, params=_Params(hold))
 
-  def _run(self, icbm, set_kph, lp_sp, n=1, buttons=(), force_decel=False, v_ego_kph=None, cluster_kph=None):
+  def _run(self, icbm, set_kph, lp_sp, n=1, buttons=(), force_decel=False, v_ego_kph=None, cluster_kph=None, hold_raise=False):
     for _ in range(n):
-      icbm.run(_cs(set_kph, buttons, v_ego_kph, cluster_kph), _cc(), lp_sp, is_metric=True, force_decel=force_decel)
+      icbm.run(_cs(set_kph, buttons, v_ego_kph, cluster_kph), _cc(), lp_sp, is_metric=True, force_decel=force_decel, hold_raise=hold_raise)
       buttons = ()
     return icbm
 
@@ -152,6 +152,24 @@ class TestIcbmHoldSetSpeed(OpenpilotTestCase):
     CS.cruiseState.standstill = True
     icbm.run(CS, _cc(), _lp_sp(), is_metric=True)
     assert not icbm.is_ready
+
+  def test_jetlink_hand_back_never_raises(self):
+    """For the seconds after the Jetlink big model is lost while in control, the built-in model is re-learning the road:
+    the set speed may come down, never go up."""
+    icbm = self._run(self._icbm(), 60, _lp_sp(), n=RESTORE_DELAY_FRAMES + 100, cluster_kph=45, hold_raise=True)
+    assert icbm.cruise_button == SendButtonState.none and icbm.state != State.increasing
+    icbm = self._run(icbm, 60, _lp_sp(), n=RESTORE_DELAY_FRAMES + 20, cluster_kph=45)  # the warning is over
+    assert icbm.state == State.increasing and icbm.cruise_button == SendButtonState.increase
+
+  def test_jetlink_hand_back_stops_a_raise_in_progress(self):
+    icbm = self._run(self._icbm(), 60, _lp_sp(), n=RESTORE_DELAY_FRAMES + 100, cluster_kph=45)
+    assert icbm.state == State.increasing
+    icbm = self._run(icbm, 60, _lp_sp(), cluster_kph=46, hold_raise=True)
+    assert icbm.state == State.holding and icbm.cruise_button == SendButtonState.none
+
+  def test_jetlink_hand_back_still_lowers(self):
+    icbm = self._run(self._icbm(), 60, _lp_sp(vision_kph=45), n=FIRST_PRESS_FRAMES, hold_raise=True)
+    assert icbm.state == State.decreasing and icbm.cruise_button == SendButtonState.decrease
 
   def test_toggle_is_read_live(self):
     icbm = self._icbm(hold=True)

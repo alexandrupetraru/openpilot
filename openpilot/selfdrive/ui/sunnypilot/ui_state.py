@@ -10,6 +10,7 @@ from openpilot.cereal import messaging, log, custom
 from opendbc.car.structs import car
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.display import OnroadBrightness
+from openpilot.sunnypilot import jetlink_adapter
 from openpilot.sunnypilot.models.helpers import ACTIVE_BUNDLE_KEYS, get_active_source
 from openpilot.sunnypilot.sunnylink.sunnylink_state import SunnylinkState
 from openpilot.system.ui.lib.application import gui_app
@@ -241,6 +242,11 @@ class UIStateSP:
       self.params.remove("CustomAccIncrementsEnabled")
       self.params.remove("SmartCruiseControlVision")
       self.params.remove("SmartCruiseControlMap")
+
+    # Jetlink: AGNOS's ADB gadget holds the USB controller the link presents its own gadget on, and jetlink refuses to
+    # take it, so ADB stays off while the link is on (a sunnylink or backup change included)
+    if jetlink_adapter.link_on() and self.params.get_bool("AdbEnabled"):
+      self.params.put_bool("AdbEnabled", False, block=True)
 
 
 class DeviceSP:

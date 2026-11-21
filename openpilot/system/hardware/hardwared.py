@@ -29,6 +29,7 @@ from openpilot.system.hardware.power_monitoring import PowerMonitoring
 from openpilot.system.hardware.fan_controller import FanController
 from openpilot.system.hardware.chestnut.status import ChestnutStatus
 from openpilot.common.version import terms_version, training_version, get_build_metadata, terms_version_sp
+from openpilot.sunnypilot import jetlink_adapter
 
 ThermalStatus = log.DeviceState.ThermalStatus
 NetworkType = log.DeviceState.NetworkType
@@ -38,6 +39,10 @@ TEMP_TAU = 5.   # 5s time constant
 DISCONNECT_TIMEOUT = 5.  # wait 5 seconds before going offroad after disconnect so you get an alert
 PANDA_STATES_TIMEOUT = round(1000 / SERVICE_LIST['pandaStates'].frequency * 1.5)  # 1.5x the expected pandaState frequency
 ONROAD_CYCLE_TIME = 1  # seconds to wait offroad after requesting an onroad cycle
+# Jetlink: a power-off first asks the host (a Jetson) to power off, which jetlink gives SHUTDOWN_TIMEOUT (25 s). This
+# cap is hardwared's own guarantee on top, written out so it holds without jetlink: a link must never keep the comma
+# on to drain the car's battery
+JETLINK_SHUTDOWN_CAP_S = 30.
 
 class Chestnut:
   # flash offroad, modeld ignores chestnut until the product string matches
@@ -209,6 +214,7 @@ def hardware_thread(end_event, hw_queue) -> None:
   startup_conditions_prev: dict[str, bool] = {}
 
   off_ts: float | None = None
+  shutdown_since: float | None = None
   started_ts: float | None = None
   started_seen = False
   startup_blocked_ts: float | None = None
@@ -359,6 +365,13 @@ def hardware_thread(end_event, hw_queue) -> None:
     # ensure device is fully booted
     startup_conditions["device_booted"] = startup_conditions.get("device_booted", False) or HARDWARE.booted()
 
+    # Jetlink: no drive starts while a power-off is waiting on the host
+    startup_conditions["not_powering_off"] = shutdown_since is None
+
+    # why the Jetlink link the user turned on cannot run; None with it off
+    jetlink_reason = jetlink_adapter.reason()
+    set_offroad_alert_if_changed("Offroad_JetlinkUnavailable", jetlink_reason is not None, extra_text=jetlink_reason)
+
     # user-forced status
     offroad_mode = params.get_bool("OffroadMode")
     startup_conditions["not_always_offroad"] = not offroad_mode
@@ -447,8 +460,15 @@ def hardware_thread(end_event, hw_queue) -> None:
     statlog.sample("som_power_draw", som_power_draw)
     msg.deviceState.somPowerDrawW = som_power_draw
 
-    # Check if we need to shut down
-    if power_monitor.should_shutdown(onroad_conditions["ignition"], in_car, off_ts, started_seen):
+    # Check if we need to shut down. With the Jetlink link on, the host is asked to power off first (shutdown_step
+    # says yes once it has, or on any failure); the cap is the guarantee. Once wanted, a power-off is final, as
+    # DoShutdown always was: jetlink's step latches, so this does too, and no drive starts meanwhile
+    # (not_powering_off). Never on a reboot: a Jetson powered off at a comma reboot does not come back
+    should_shutdown = power_monitor.should_shutdown(onroad_conditions["ignition"], in_car, off_ts, started_seen)
+    if should_shutdown and shutdown_since is None:
+      shutdown_since = time.monotonic()
+    shutdown_capped = shutdown_since is not None and time.monotonic() - shutdown_since > JETLINK_SHUTDOWN_CAP_S
+    if jetlink_adapter.shutdown_step(should_shutdown, f"offroad since {off_ts}") or shutdown_capped:
       cloudlog.warning(f"shutting device down, offroad since {off_ts}")
       params.put_bool("DoShutdown", True, block=True)
 

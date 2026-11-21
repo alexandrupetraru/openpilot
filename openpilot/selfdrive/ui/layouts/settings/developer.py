@@ -1,4 +1,5 @@
 from openpilot.common.params import Params
+from openpilot.sunnypilot import jetlink_adapter
 from openpilot.selfdrive.ui.widgets.ssh_key import ssh_key_item
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets import Widget
@@ -41,10 +42,11 @@ class DeveloperLayout(Widget):
     # Build items and keep references for callbacks/state updates
     self._adb_toggle = toggle_item(
       lambda: tr("Enable ADB"),
-      description=lambda: tr(DESCRIPTIONS["enable_adb"]),
+      description=lambda: tr(DESCRIPTIONS["enable_adb"]) + (" " + tr("Unavailable while Jetlink is on: it uses the USB port.")
+                                                             if jetlink_adapter.link_on() else ""),
       initial_state=self._params.get_bool("AdbEnabled"),
       callback=self._on_enable_adb,
-      enabled=ui_state.is_offroad,
+      enabled=lambda: ui_state.is_offroad() and not jetlink_adapter.link_on(),
     )
 
     # SSH enable toggle + SSH key management
