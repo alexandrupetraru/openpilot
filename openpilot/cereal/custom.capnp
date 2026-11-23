@@ -504,6 +504,9 @@ struct CarStateIC @0xfc6241ed8877b611 {
   cruiseSpeedLimit @5 :Float32;
   cruiseSpeedLimitPredicative @6 :Float32;
   cruiseSpeedLimitPredicativeType @7 :UInt8;
+  # the car's own Lane Assist: active (it may steer), and steering now (reacting to a line)
+  stockLaneAssistActive @8 :Bool;
+  stockLaneAssistIntervening @9 :Bool;
 
   struct BatteryDetails {
     capacity @0 :Float32;

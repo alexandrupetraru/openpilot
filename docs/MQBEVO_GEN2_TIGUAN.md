@@ -9,7 +9,8 @@ error) and made Intelligent Cruise Button Management walk the set speed down on 
 Repository: `https://github.com/alexandrupetraru/openpilot`, branch `tiguan-mk3`.
 The `opendbc_repo` submodule points at `https://github.com/alexandrupetraru/opendbc` (same branch name).
 
-Branch `tiguan-mk3-jetlink` is `tiguan-mk3` plus Jetlink (below); its opendbc is the same `tiguan-mk3` commit.
+Branch `tiguan-mk3-jetlink` is `tiguan-mk3` plus Jetlink (below); its opendbc is the `tiguan-mk3` commit plus the
+stock Lane Assist read (2026-11-23, below).
 `tiguan-mk3` stays as the fallback. Custom Software URL: `alexandrupetraru/tiguan-mk3-jetlink`.
 
 ## Jetlink: the large driving model on a connected computer or phone (branch `tiguan-mk3-jetlink`)
@@ -82,6 +83,34 @@ Decided on the owner's drives (7 drives, ~2 h, Cluj city and local roads up to 7
 * Pick-up stays bounded by ICBM's press rate (one press per 0.2 s, ~5 km/h per s) and the car's own ACC acceleration.
 * Fast curves: vision sees a bend late at speed (the model reads far curvature low); map data is what slows early, and
   the gate leaves far map points alone.
+
+## The car's own Lane Assist overrides openpilot (2026-11-23)
+
+**What happened.** Night, light rain, wet road with streetlight streaks along the lane, left-hand curve at 64 km/h
+(route `00000081--778c559776`, ~199 s, built-in model). openpilot requested the curve throughout, and increased the
+request as the car drifted. Every HCA_03 frame reached the bus (none blocked), and the EPS reported HCA **active**.
+Yet the wheel unwound from +8° to −2° in ~0.45 s, toward the outside of the curve, while the driver's torque was
+negligible and opposed the motion. "Turn Exceeds Steering Limit" followed 0.55 s later, and the driver steered back
+and braked.
+
+**Why.** The car's own Lane Assist was switched on, as it was in every logged drive (it appears to re-enable at each
+ignition). It turns active above ~60 km/h. Its camera's `LDW_02` showed it active from 184.9 s, then reacting
+(yellow) from 195.9 s, with its distance to a line at 0.00–0.03 m for 3 s. The unwind moved the car away from that
+line. On Gen 2 its steering request reaches the EPS over Ethernet: there is no `HCA_01` on CAN. The harness cannot
+block it, and the EPS followed it over openpilot's request. Milder cases of the same pattern are in the `tiguan-mk3`
+drive of 21 Nov and in the big-model drives. It is not caused by Jetlink, ICBM or the model.
+
+**Alerts** (`CarStateIC.stockLaneAssistActive` / `stockLaneAssistIntervening`, from the stock `LDW_02` lamps):
+
+| Stock lamps | Meaning | While openpilot or MADS steers |
+|---|---|---|
+| both lit | on, standing by (below ~60 km/h) | nothing |
+| green only | active: it may steer | after 1 s: **"Turn Off the Car's Lane Assist"**, single chime |
+| yellow only | steering now, reacting to a line | at once: **"TAKE CONTROL / Car's Lane Assist is steering"**, warning chime |
+
+On the 23 Nov drive these signals would have given the reminder 13 s before the unwind and the take-control 2.9 s
+before it. **Turn Lane Assist off in the car before every drive.** Then neither alert should appear, which the first
+drive with it off should confirm: the lamp states with it off have not been logged yet.
 
 ## Vehicle selection
 
@@ -180,6 +209,7 @@ lockout after two reds or one ignored red (1 / 5 / 15 / 30 min). Side effect of 
 * infiniteCable: "VW: Lateral Correction (Recommended)" on; the four "VW: Speed Limit …" toggles off
   until the car's reported limits have been checked in Info mode.
 * sunnypilot Longitudinal Control (alpha) **off** — Gen 2 has no decoded radar objects.
+* The car's own **Lane Assist off** before every drive: it can override openpilot's steering (see 2026-11-23 above).
 
 ## Verify on the car
 

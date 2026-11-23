@@ -12,6 +12,10 @@ GearShifter = structs.CarState.GearShifter
 EventName = log.OnroadEvent.EventName
 NetworkLocation = structs.CarParams.NetworkLocation
 
+# the car's own Lane Assist must stay active this long while openpilot steers before it is flagged: around its switch-on
+# speed (~60 km/h on the Tiguan Mk3) its lamp flips between standby and active
+STOCK_LANE_ASSIST_ONSET_FRAMES = int(1. / DT_CTRL)
+
 
 class CarEvents:
   def __init__(self, CP: structs.CarParams):
@@ -21,12 +25,21 @@ class CarEvents:
     self.low_speed_alert = False
     self.no_steer_warning = False
     self.silent_steer_warning = True
+    self.stock_lane_assist_frames = 0
 
   def update(self, CS: car.CarState, CS_prev: car.CarState, CC: car.CarControl, CS_IC: structs.CarStateIC):
     if self.CP.brand in ('body', 'mock'):
       return Events()
 
     events = self.create_common_events(CS, CS_prev, CS_IC)
+
+    # The car's own Lane Assist while openpilot steers (VW MQB Evo Gen 2): its request reaches the EPS where the harness
+    # cannot stop it, and the EPS follows it over openpilot's. Steering now: take control at once. Active: turn it off
+    self.stock_lane_assist_frames = self.stock_lane_assist_frames + 1 if CC.latActive and CS_IC.stockLaneAssistActive else 0
+    if CC.latActive and CS_IC.stockLaneAssistIntervening:
+      events.add(EventName.stockLaneAssistIntervening)
+    elif self.stock_lane_assist_frames >= STOCK_LANE_ASSIST_ONSET_FRAMES:
+      events.add(EventName.stockLaneAssistActive)
 
     if self.CP.brand == 'chrysler':
       # Low speed steer alert hysteresis logic

@@ -355,6 +355,25 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 1.8),
   },
 
+  # VW MQB Evo Gen 2: the car's own Lane Assist is active while openpilot steers. Its request reaches the EPS where the
+  # harness cannot stop it, and the EPS follows it over openpilot's
+  EventName.stockLaneAssistActive: {
+    ET.WARNING: Alert(
+      "Turn Off the Car's Lane Assist",
+      "It can override openpilot's steering",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 3.),
+  },
+
+  # ...and it is steering now, reacting to a line it sees: the wheel can leave openpilot's path at any moment
+  EventName.stockLaneAssistIntervening: {
+    ET.WARNING: Alert(
+      "TAKE CONTROL",
+      "Car's Lane Assist is steering",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.MID, VisualAlert.steerRequired, AudibleAlert.warningSoft, 3.),
+  },
+
   EventName.driverDistracted1: {
     ET.PERMANENT: Alert(
       "Pay Attention",
