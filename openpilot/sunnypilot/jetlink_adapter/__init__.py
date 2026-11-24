@@ -78,6 +78,12 @@ def link_mode() -> str:
   return MODES[mode] if 0 <= mode < len(MODES) else MODES[0]
 
 
+def charge_phone_applies() -> bool:
+  """Does the phone-charging setting (KEYS.charge_phone) do anything? Only with the link set to iPhone/iPad: jetlink
+  then asks a phone plugged straight into the comma to charge from it (up to 7.5 W), once each plug."""
+  return link_mode() == 'ios'
+
+
 def host_picks_model(chestnut_present: bool) -> bool:
   """Is the big model the connected computer's or phone's pick rather than the model manager's? With the link on and
   no chestnut fitted (a chestnut stands jetlink down): KEYS hands jetlink no model-manager pick, so it runs the model

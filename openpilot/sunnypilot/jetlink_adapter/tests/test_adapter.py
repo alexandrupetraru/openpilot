@@ -49,6 +49,18 @@ class TestJetlinkSetting(OpenpilotTestCase):
       assert jetlink_adapter.link_on() is on, value
       assert jetlink_adapter.link_mode() == mode, value
 
+  def test_charge_switch_applies_only_to_an_iphone(self):
+    """Settings → Models shows "Charge iPhone or iPad" only with the link set to iPhone/iPad, the only mode jetlink
+    charges a phone in; it writes the key jetlink reads, which is off until the driver turns it on."""
+    for value, applies in ((None, False), (0, False), (1, False), (2, True), (3, False), ('junk', False)):
+      _set_link(value)
+      assert jetlink_adapter.charge_phone_applies() is applies, value
+    keys_h = (REPO / 'openpilot/common/params_keys.h').read_text()
+    assert f'{{"{jetlink_adapter.KEYS.charge_phone}", {{PERSISTENT, BOOL, "0"}}}}' in keys_h
+    if HAVE_JETLINK:
+      from jetlink.openpilot.stock import Stock
+      assert jetlink_adapter.KEYS.charge_phone == Stock.KEYS.charge_phone
+
   def test_fallback_answers_as_the_link_off(self):
     """The fork's own hooks for a jetlink that is missing or too old: each answers as jetlink's Off does."""
     if not HAVE_JETLINK:

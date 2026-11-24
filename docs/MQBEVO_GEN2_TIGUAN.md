@@ -22,6 +22,10 @@ selfdrived output on replayed drives, same model output).
 **Setup.** Settings → Models → **Jetlink**: *USB* for a Jetson Orin Nano Super, a Linux PC with an NVIDIA GPU, an
 Apple-silicon Mac or an Android phone (experimental); *iPhone* for an iPhone/iPad with USB-C (TestFlight app, keep it
 on screen and the phone unlocked). Change it only when parked. Turning it on turns ADB off (the link uses the port).
+* **Charge iPhone or iPad** (shown with *iPhone* selected, parked only): the comma charges the phone/tablet at up to
+  7.5 W over a direct USB-C cable, no hub. Off by default; it applies at the next plug. If the link drops while
+  charging, Jetlink stops charging until the next plug. On the M1 iPad with Light Speed 2, 7.5 W may only slow the
+  drain on a long drive.
 * Power the comma 3X from the car harness only, and the computer from its own supply: never let the host's port power
   the comma. A USB 3 cable (USB 2 is over the 50 ms frame budget on a Mac). Engine start and start-stop can brown a
   host out; the comma then simply falls back.

@@ -127,6 +127,13 @@ class ModelsLayout(Widget):
       button_width=250,
       callback=None,
     )
+    # charging the phone from the comma's port (jetlink.comma.port): asked for once a plug, so it applies at the next one
+    self.jetlink_charge_toggle = toggle_item_sp(
+      tr("Charge iPhone or iPad"),
+      tr("Charge the iPhone or iPad from the comma, up to 7.5 W, when it is plugged straight into the comma's USB-C port " +
+         "with no hub. Some devices drop the link while the comma charges them; Jetlink then stops charging until the " +
+         "next plug. Takes effect the next time you plug the device in. Change it only when parked."),
+      param=jetlink_adapter.KEYS.charge_phone)
     self.big_model_smoothing_toggle = toggle_item_sp(
       tr("Smooth Big Model"),
       tr("Smooth the big model's steering requests a little more (0.1 s). Big models can carry a slight weave on straight roads " +
@@ -134,7 +141,7 @@ class ModelsLayout(Widget):
       param="BigModelSmoothing")
 
     self.items = [self.small_model_item, self.big_model_item, self.cancel_download_item, self.download_item, self.refresh_item, self.clear_cache_item,
-                  self.jetlink_mode, self.big_model_smoothing_toggle,
+                  self.jetlink_mode, self.jetlink_charge_toggle, self.big_model_smoothing_toggle,
                   self.lane_turn_desire_toggle, self.lane_turn_value_control, self.lagd_toggle, self.delay_control, self.camera_offset]
 
   def _jetlink_description(self) -> str:
@@ -412,6 +419,10 @@ class ModelsLayout(Widget):
     offroad = ui_state.is_offroad()
     # the link's mode changes the USB gadget: only while parked
     self.jetlink_mode.action_item.set_enabled(offroad)
+    # the comma asks for the power swap once a plug, and some phones drop the link on it: switched only while parked
+    self.jetlink_charge_toggle.action_item.set_state(ui_state.params.get_bool(jetlink_adapter.KEYS.charge_phone))
+    self.jetlink_charge_toggle.action_item.set_enabled(offroad)
+    self.jetlink_charge_toggle.set_visible(jetlink_adapter.charge_phone_applies())
     self.big_model_smoothing_toggle.action_item.set_state(ui_state.params.get_bool("BigModelSmoothing"))
     self.big_model_smoothing_toggle.set_visible(jetlink_adapter.link_on())
     self._update_jetlink_status()
